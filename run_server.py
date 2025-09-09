@@ -19,14 +19,13 @@ os.environ.setdefault("DEBUG", "True")
 
 if __name__ == "__main__":
     import uvicorn
-    from api.main import app
     
     print("Starting Inbound Carrier Sales Agent API...")
     print("Health check: http://localhost:8000/api/health")
     print("API Documentation: http://localhost:8000/docs")
     
     uvicorn.run(
-        app,
+        "api.main:app",
         host="0.0.0.0",
         port=8000,
         reload=True
