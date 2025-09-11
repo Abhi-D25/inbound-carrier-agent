@@ -99,11 +99,14 @@ class NegotiationPolicy:
         - Round 3: Counter at 99% of listed rate
         """
         if round_number == 1:
-            return listed_rate * 0.95
+            counter = listed_rate * 0.95
         elif round_number == 2:
-            return listed_rate * 0.97
+            counter = listed_rate * 0.97
         else:
-            return listed_rate * 0.99
+            counter = listed_rate * 0.99
+    
+        # Round to nearest $10
+        return round(counter / 10) * 10
     
     def get_negotiation_summary(self, listed_rate: float) -> Dict[str, Any]:
         """

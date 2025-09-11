@@ -74,6 +74,11 @@ async def verify_mc(
     """
     try:
         conversation_manager = ConversationManager(db)
+        
+        # Auto-initialize conversation if it doesn't exist
+        if request.call_id not in conversation_manager.conversations:
+            conversation_manager.start_conversation(request.call_id)
+        
         result = conversation_manager.process_mc_number(
             request.call_id, 
             request.mc_number
@@ -101,6 +106,11 @@ async def search_loads(
     """
     try:
         conversation_manager = ConversationManager(db)
+        
+        # Auto-initialize conversation if it doesn't exist
+        if request.call_id not in conversation_manager.conversations:
+            conversation_manager.start_conversation(request.call_id)
+        
         result = conversation_manager.search_and_present_loads(
             call_id=request.call_id,
             equipment_type=request.equipment_type,
@@ -130,6 +140,11 @@ async def negotiate(
     """
     try:
         conversation_manager = ConversationManager(db)
+        
+        # Auto-initialize conversation if it doesn't exist
+        if request.call_id not in conversation_manager.conversations:
+            conversation_manager.start_conversation(request.call_id)
+        
         result = conversation_manager.handle_negotiation(
             request.call_id,
             request.carrier_offer

@@ -67,3 +67,6 @@ logs/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# JSON files
+conversations.json

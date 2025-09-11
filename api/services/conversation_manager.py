@@ -3,6 +3,9 @@
 Conversation state manager for HappyRobot agent integration.
 Handles the flow: MC verification → Load search → Negotiation → Transfer
 """
+import json
+import os
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from enum import Enum
 from sqlalchemy.orm import Session
@@ -32,8 +35,45 @@ class ConversationManager:
         self.load_service = LoadSearchService(db)
         self.negotiation_policy = NegotiationPolicy()
         
-        # In-memory conversation state (should be Redis in production)
-        self.conversations: Dict[str, Dict[str, Any]] = {}
+        # Simple file-based conversation storage for the assessment
+        self.conversations_file = Path("conversations.json")
+        self._load_conversations()
+    
+    def _load_conversations(self):
+        """Load conversations from file."""
+        try:
+            if self.conversations_file.exists():
+                with open(self.conversations_file, 'r') as f:
+                    data = json.load(f)
+                    # Convert state strings back to enum values
+                    for call_id, conversation in data.items():
+                        if isinstance(conversation.get("state"), str):
+                            try:
+                                conversation["state"] = ConversationState(conversation["state"])
+                            except ValueError:
+                                conversation["state"] = ConversationState.GREETING
+                    self.conversations = data
+            else:
+                self.conversations = {}
+        except Exception as e:
+            print(f"Error loading conversations: {e}")
+            self.conversations = {}
+    
+    def _save_conversations(self):
+        """Save conversations to file."""
+        try:
+            # Convert enum values to strings for JSON serialization
+            data_to_save = {}
+            for call_id, conversation in self.conversations.items():
+                conv_copy = conversation.copy()
+                if hasattr(conv_copy.get("state"), 'value'):
+                    conv_copy["state"] = conv_copy["state"].value
+                data_to_save[call_id] = conv_copy
+            
+            with open(self.conversations_file, 'w') as f:
+                json.dump(data_to_save, f, indent=2, default=str)
+        except Exception as e:
+            print(f"Error saving conversations: {e}")
     
     def start_conversation(self, call_id: str) -> Dict[str, Any]:
         """Initialize a new conversation."""
@@ -44,6 +84,7 @@ class ConversationManager:
             "negotiation_rounds": 0,
             "created_at": self._get_timestamp()
         }
+        self._save_conversations()
         
         return {
             "call_id": call_id,
@@ -56,7 +97,9 @@ class ConversationManager:
         """Process MC number verification."""
         conversation = self.conversations.get(call_id)
         if not conversation:
-            return {"error": "Conversation not found"}
+            # Auto-initialize if conversation doesn't exist
+            self.start_conversation(call_id)
+            conversation = self.conversations[call_id]
         
         # Verify with FMCSA
         verification = self.fmcsa_client.verify_carrier(mc_number)
@@ -67,6 +110,7 @@ class ConversationManager:
         if verification["eligible"]:
             conversation["state"] = ConversationState.LOAD_SEARCH
             conversation["data"]["carrier_name"] = verification["carrier_name"]
+            self._save_conversations()
             
             return {
                 "call_id": call_id,
@@ -78,6 +122,7 @@ class ConversationManager:
             }
         else:
             conversation["state"] = ConversationState.FAILED
+            self._save_conversations()
             return {
                 "call_id": call_id,
                 "state": ConversationState.FAILED.value,
@@ -92,7 +137,9 @@ class ConversationManager:
         """Search for loads and present the best match."""
         conversation = self.conversations.get(call_id)
         if not conversation:
-            return {"error": "Conversation not found"}
+            # Auto-initialize if conversation doesn't exist
+            self.start_conversation(call_id)
+            conversation = self.conversations[call_id]
         
         # Search for loads
         search_request = LoadSearchRequest(
@@ -107,6 +154,7 @@ class ConversationManager:
         
         if not loads:
             conversation["state"] = ConversationState.FAILED
+            self._save_conversations()
             return {
                 "call_id": call_id,
                 "state": ConversationState.FAILED.value,
@@ -119,6 +167,7 @@ class ConversationManager:
         conversation["data"]["presented_load"] = best_load
         conversation["data"]["equipment_type"] = equipment_type
         conversation["state"] = ConversationState.LOAD_PRESENTATION
+        self._save_conversations()
         
         return {
             "call_id": call_id,
@@ -134,8 +183,18 @@ class ConversationManager:
         if not conversation:
             return {"error": "Conversation not found"}
         
-        load = conversation["data"]["presented_load"]
-        listed_rate = load["total_rate"]
+        # Check if load was presented
+        presented_load = conversation["data"].get("presented_load")
+        if not presented_load:
+            return {
+                "call_id": call_id,
+                "state": ConversationState.FAILED.value,
+                "outcome": "error",
+                "message": "Please search for a load first before negotiating.",
+                "next_action": "search_loads"
+            }
+        
+        listed_rate = presented_load["total_rate"]
         
         conversation["negotiation_rounds"] += 1
         round_number = conversation["negotiation_rounds"]
@@ -158,6 +217,7 @@ class ConversationManager:
         if evaluation["outcome"] == "accept":
             conversation["state"] = ConversationState.AGREEMENT
             conversation["data"]["final_rate"] = carrier_offer
+            self._save_conversations()
             
             return {
                 "call_id": call_id,
@@ -171,6 +231,7 @@ class ConversationManager:
         elif evaluation["outcome"] == "counter":
             conversation["state"] = ConversationState.NEGOTIATION
             counter_offer = evaluation["counter_offer"]
+            self._save_conversations()
             
             return {
                 "call_id": call_id,
@@ -185,6 +246,7 @@ class ConversationManager:
         
         else:  # reject or max_rounds_reached
             conversation["state"] = ConversationState.FAILED
+            self._save_conversations()
             
             return {
                 "call_id": call_id,
@@ -205,7 +267,7 @@ class ConversationManager:
         
         return {
             "call_id": call_id,
-            "final_state": conversation["state"].value,
+            "final_state": conversation["state"].value if hasattr(conversation["state"], 'value') else str(conversation["state"]),
             "mc_number": data.get("mc_number"),
             "carrier_name": data.get("carrier_name"),
             "fmcsa_status": data.get("fmcsa_verification", {}).get("status"),
@@ -284,7 +346,11 @@ class ConversationManager:
         
         # Analyze gap between offers and listed rate
         first_offer = history[0]["carrier_offer"]
-        listed_rate = conversation["data"]["presented_load"]["total_rate"]
+        presented_load = conversation["data"].get("presented_load")
+        if not presented_load:
+            return "unknown"
+            
+        listed_rate = presented_load["total_rate"]
         gap_percentage = (listed_rate - first_offer) / listed_rate * 100
         
         if gap_percentage > 15:
