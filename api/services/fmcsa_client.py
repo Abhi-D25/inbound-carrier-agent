@@ -1,13 +1,14 @@
 """
-FMCSA API client for carrier verification.
+Enhanced FMCSA API client with proper MC number validation.
 """
 import os
 import requests
+import re
 from typing import Dict, Any, Optional
 import json
 
 class FMCSAClient:
-    """Client for FMCSA API integration."""
+    """Client for FMCSA API integration with proper validation."""
     
     def __init__(self):
         self.api_key = os.getenv("FMCSA_API_KEY")
@@ -16,7 +17,7 @@ class FMCSAClient:
     
     def verify_carrier(self, mc_number: str) -> Dict[str, Any]:
         """
-        Verify a carrier using the FMCSA API.
+        Verify a carrier using the FMCSA API with proper validation.
         
         Args:
             mc_number: Motor Carrier number to verify
@@ -24,9 +25,24 @@ class FMCSAClient:
         Returns:
             Dictionary with verification results
         """
-        # If no API key is configured, return a deterministic stub
+        # CRITICAL FIX: Validate MC number format first
+        if not self._is_valid_mc_format(mc_number):
+            return {
+                "mc_number": mc_number,
+                "eligible": False,
+                "carrier_name": "Invalid MC Number",
+                "status": "Invalid",
+                "reason": f"MC number '{mc_number}' is not valid. MC numbers must be 1-7 digits.",
+                "raw_data": {
+                    "error": "Invalid MC number format",
+                    "provided_mc": mc_number
+                },
+                "verified_at": self._get_current_timestamp()
+            }
+        
+        # If no API key is configured, use enhanced stub with validation
         if not self.api_key or self.api_key == "your-fmcsa-api-key-here":
-            return self._get_stub_response(mc_number)
+            return self._get_validated_stub_response(mc_number)
         
         try:
             # Make API request to FMCSA
@@ -35,7 +51,42 @@ class FMCSAClient:
             
         except Exception as e:
             # Fallback to stub on API error
-            return self._get_stub_response(mc_number, error=str(e))
+            return self._get_validated_stub_response(mc_number, error=str(e))
+    
+    def _is_valid_mc_format(self, mc_number: str) -> bool:
+        """
+        Validate MC number format.
+        
+        MC numbers should be:
+        - Numeric only
+        - Between 1 and 7 digits
+        - No special characters or letters
+        
+        Args:
+            mc_number: The MC number to validate
+            
+        Returns:
+            True if valid format, False otherwise
+        """
+        if not mc_number:
+            return False
+        
+        # Remove any whitespace
+        mc_number = mc_number.strip()
+        
+        # Check if it's all digits
+        if not mc_number.isdigit():
+            return False
+        
+        # Check length (MC numbers are typically 1-7 digits)
+        if len(mc_number) < 1 or len(mc_number) > 7:
+            return False
+        
+        # Additional check: MC numbers shouldn't start with 0 (except for very old ones)
+        if len(mc_number) > 1 and mc_number[0] == '0':
+            return False
+        
+        return True
     
     def _make_fmcsa_request(self, mc_number: str) -> Dict[str, Any]:
         """
@@ -72,8 +123,6 @@ class FMCSAClient:
             Standardized verification result
         """
         # Extract relevant fields from FMCSA response
-        # Note: This structure may need adjustment based on actual FMCSA API response format
-        
         carrier_name = api_response.get("legalName", "Unknown Carrier")
         status = api_response.get("carrierStatus", "Unknown")
         
@@ -111,17 +160,19 @@ class FMCSAClient:
         
         # Check if status is eligible
         if status in eligible_statuses:
+            # Additional checks even for active carriers
+            
+            # Check for out-of-service orders
+            out_of_service = api_response.get("outOfService", False)
+            if out_of_service:
+                return False
+            
+            # Check for insurance status
+            insurance_status = api_response.get("insuranceStatus", "").lower()
+            if insurance_status in ["lapsed", "cancelled", "suspended"]:
+                return False
+            
             return True
-        
-        # Check for out-of-service orders
-        out_of_service = api_response.get("outOfService", False)
-        if out_of_service:
-            return False
-        
-        # Check for insurance status
-        insurance_status = api_response.get("insuranceStatus", "").lower()
-        if insurance_status in ["lapsed", "cancelled", "suspended"]:
-            return False
         
         return False
     
@@ -150,9 +201,10 @@ class FMCSAClient:
         
         return f"Carrier status: {status}"
     
-    def _get_stub_response(self, mc_number: str, error: Optional[str] = None) -> Dict[str, Any]:
+    def _get_validated_stub_response(self, mc_number: str, error: Optional[str] = None) -> Dict[str, Any]:
         """
-        Generate a deterministic stub response for testing.
+        Generate a validated stub response for testing.
+        Now includes proper validation logic.
         
         Args:
             mc_number: Motor Carrier number
@@ -161,29 +213,77 @@ class FMCSAClient:
         Returns:
             Stub verification result
         """
-        # Deterministic logic based on MC number
-        mc_int = int(mc_number) if mc_number.isdigit() else hash(mc_number) % 1000000
+        # First, validate the MC number format
+        if not self._is_valid_mc_format(mc_number):
+            return {
+                "mc_number": mc_number,
+                "eligible": False,
+                "carrier_name": "Invalid MC Number",
+                "status": "Invalid Format",
+                "reason": f"MC number '{mc_number}' has invalid format. Must be 1-7 digits only.",
+                "raw_data": {
+                    "stub": True,
+                    "error": "Invalid MC number format",
+                    "provided_mc": mc_number
+                },
+                "verified_at": self._get_current_timestamp()
+            }
         
-        # 80% of carriers are eligible (for demo purposes)
-        eligible = (mc_int % 5) != 0
+        # Use deterministic logic for valid MC numbers
+        mc_int = int(mc_number)
+        
+        # Known test MC numbers for the demo
+        known_carriers = {
+            123456: {"name": "ABC Transport LLC", "status": "Active", "eligible": True},
+            234567: {"name": "XYZ Logistics Inc", "status": "Active", "eligible": True},
+            345678: {"name": "Premier Freight Lines", "status": "Active", "eligible": True},
+            456789: {"name": "Reliable Carriers Co", "status": "Active", "eligible": True},
+            567890: {"name": "Swift Transportation", "status": "Active", "eligible": True},
+            111111: {"name": "Test Carrier 1", "status": "Out of Service", "eligible": False},
+            222222: {"name": "Test Carrier 2", "status": "Insurance Lapsed", "eligible": False},
+            999999: {"name": "Demo Carrier", "status": "Active", "eligible": True}
+        }
+        
+        # Check if it's a known test carrier
+        if mc_int in known_carriers:
+            carrier_info = known_carriers[mc_int]
+            return {
+                "mc_number": mc_number,
+                "eligible": carrier_info["eligible"],
+                "carrier_name": carrier_info["name"],
+                "status": carrier_info["status"],
+                "reason": "Carrier is active and authorized" if carrier_info["eligible"] else f"Carrier status: {carrier_info['status']}",
+                "raw_data": {
+                    "stub": True,
+                    "test_carrier": True,
+                    "note": "Known test carrier for demo"
+                },
+                "verified_at": self._get_current_timestamp()
+            }
+        
+        # For unknown MC numbers, use deterministic eligibility
+        # 80% eligible for valid MC numbers (based on last digit)
+        last_digit = mc_int % 10
+        eligible = last_digit not in [0, 1]  # 80% chance of being eligible
         
         # Generate carrier name based on MC number
         carrier_names = [
-            "ABC Transport LLC",
-            "XYZ Logistics Inc",
-            "Premier Freight Lines",
-            "Reliable Carriers Co",
-            "Swift Transportation"
+            "Regional Transport LLC",
+            "Interstate Logistics Inc",
+            "National Freight Lines",
+            "Express Carriers Co",
+            "Continental Transportation"
         ]
-        carrier_name = carrier_names[mc_int % len(carrier_names)]
+        carrier_name = carrier_names[mc_int % len(carrier_names)] + f" #{mc_number}"
         
         # Generate status
         if eligible:
             status = "Active"
             reason = "Carrier is active and authorized"
         else:
-            status = "Out of Service"
-            reason = "Carrier has compliance issues"
+            statuses = ["Out of Service", "Insurance Lapsed", "Authority Revoked"]
+            status = statuses[mc_int % len(statuses)]
+            reason = f"Carrier has compliance issues: {status}"
         
         return {
             "mc_number": mc_number,

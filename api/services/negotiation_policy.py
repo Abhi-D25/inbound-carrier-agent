@@ -1,5 +1,5 @@
 """
-Negotiation policy service for evaluating offers and counter-offers.
+Enhanced negotiation policy service with carrier-aware counter-offers.
 """
 from typing import Dict, Any
 from enum import Enum
@@ -11,23 +11,23 @@ class NegotiationOutcome(Enum):
     MAX_ROUNDS_REACHED = "max_rounds_reached"
 
 class NegotiationPolicy:
-    """Policy engine for load negotiations."""
+    """Policy engine for load negotiations with intelligent counter-offers."""
     
     def __init__(self):
-        self.max_rounds = 4  # Allow 4 rounds: 2 standard counters + 1 floor rate + 1 reject
+        self.max_rounds = 3  # Maximum 3 rounds of negotiation
         self.target_multiplier = 1.0  # Target equals listed rate (100%)
         self.floor_multiplier = 0.93  # Floor equals 93% of listed rate
+        self.acceptance_threshold = 0.95  # Accept if carrier offer is >= 95% of listed rate
     
     def evaluate_offer(self, listed_rate: float, offer: float, round_number: int) -> Dict[str, Any]:
         """
-        Evaluate a carrier's offer with 4-round negotiation strategy.
+        Evaluate a carrier's offer with intelligent negotiation strategy.
         
-        Strategy:
-        - Round 1: Counter at 97% of listed rate (higher initial counter)
-        - Round 2: Counter at 95% of listed rate (slight decrease to show flexibility)
-        - Round 3: Counter with floor rate (93%) as final offer
-        - Round 4+: Reject any further negotiations
-        - Accept immediately if offer >= target at any point
+        Key improvements:
+        1. Never counter with less than the carrier's current offer
+        2. Accept reasonable offers (>= 95% of listed rate) immediately
+        3. Make smaller concessions as rounds progress
+        4. Consider the carrier's offer when making counter-offers
         
         Args:
             listed_rate: The original listed rate for the load
@@ -39,86 +39,149 @@ class NegotiationPolicy:
         """
         target_rate = listed_rate * self.target_multiplier
         floor_rate = listed_rate * self.floor_multiplier
+        acceptance_threshold_rate = listed_rate * self.acceptance_threshold
         
-        # Accept immediately if offer meets or exceeds target (any round)
-        if offer >= target_rate:
+        # Accept immediately if offer meets acceptance threshold (95% of listed)
+        if offer >= acceptance_threshold_rate:
             return {
                 "outcome": NegotiationOutcome.ACCEPT.value,
-                "message": "Offer accepted - meets target rate",
+                "message": f"Offer accepted at ${offer:.2f}",
                 "target_rate": target_rate,
                 "floor_rate": floor_rate,
                 "counter_offer": None,
-                "round": round_number,
-                "max_rounds": self.max_rounds
-            }
-        
-        # Handle negotiation rounds
-        if round_number <= 2:
-            # Rounds 1-2: Always counter with standard progression
-            counter_offer = self._calculate_counter_offer(listed_rate, offer, round_number)
-            
-            return {
-                "outcome": NegotiationOutcome.COUNTER.value,
-                "message": f"Counter offer: ${counter_offer:.2f}",
-                "target_rate": target_rate,
-                "floor_rate": floor_rate,
-                "counter_offer": counter_offer,
-                "round": round_number,
-                "max_rounds": self.max_rounds
-            }
-        
-        elif round_number == 3:
-            # Round 3: Final counter with floor rate
-            counter_offer = self._round_to_nearest_10(floor_rate)
-            
-            return {
-                "outcome": NegotiationOutcome.COUNTER.value,
-                "message": f"Final offer: ${counter_offer:.2f} - this is our absolute minimum",
-                "target_rate": target_rate,
-                "floor_rate": floor_rate,
-                "counter_offer": counter_offer,
                 "round": round_number,
                 "max_rounds": self.max_rounds,
-                "is_final_offer": True
+                "accepted_rate": offer
             }
         
-        else:
-            # Round 4+: No more negotiations, reject
+        # Reject if offer is below floor rate
+        if offer < floor_rate:
+            if round_number >= self.max_rounds:
+                return {
+                    "outcome": NegotiationOutcome.REJECT.value,
+                    "message": f"Cannot accept below our minimum rate of ${floor_rate:.2f}",
+                    "target_rate": target_rate,
+                    "floor_rate": floor_rate,
+                    "counter_offer": None,
+                    "round": round_number,
+                    "max_rounds": self.max_rounds
+                }
+            else:
+                # Counter with floor rate as minimum
+                counter_offer = self._calculate_intelligent_counter(
+                    listed_rate, offer, round_number, floor_rate
+                )
+                return {
+                    "outcome": NegotiationOutcome.COUNTER.value,
+                    "message": f"Counter offer: ${counter_offer:.2f}",
+                    "target_rate": target_rate,
+                    "floor_rate": floor_rate,
+                    "counter_offer": counter_offer,
+                    "round": round_number,
+                    "max_rounds": self.max_rounds
+                }
+        
+        # Check if we've reached max rounds
+        if round_number >= self.max_rounds:
+            # On the last round, accept if it's above floor
+            if offer >= floor_rate:
+                return {
+                    "outcome": NegotiationOutcome.ACCEPT.value,
+                    "message": f"Final round - accepting offer at ${offer:.2f}",
+                    "target_rate": target_rate,
+                    "floor_rate": floor_rate,
+                    "counter_offer": None,
+                    "round": round_number,
+                    "max_rounds": self.max_rounds,
+                    "accepted_rate": offer
+                }
+            else:
+                return {
+                    "outcome": NegotiationOutcome.REJECT.value,
+                    "message": "Maximum negotiation rounds reached",
+                    "target_rate": target_rate,
+                    "floor_rate": floor_rate,
+                    "counter_offer": None,
+                    "round": round_number,
+                    "max_rounds": self.max_rounds
+                }
+        
+        # Calculate intelligent counter-offer
+        counter_offer = self._calculate_intelligent_counter(
+            listed_rate, offer, round_number, floor_rate
+        )
+        
+        # CRITICAL FIX: Never counter with less than the carrier's offer
+        if counter_offer <= offer:
+            # Accept the carrier's offer if our counter would be less
             return {
-                "outcome": NegotiationOutcome.REJECT.value,
-                "message": f"We've reached our maximum negotiations. Cannot accept below ${floor_rate:.2f}",
+                "outcome": NegotiationOutcome.ACCEPT.value,
+                "message": f"Accepting your offer at ${offer:.2f}",
                 "target_rate": target_rate,
                 "floor_rate": floor_rate,
                 "counter_offer": None,
                 "round": round_number,
-                "max_rounds": self.max_rounds
+                "max_rounds": self.max_rounds,
+                "accepted_rate": offer
             }
+        
+        return {
+            "outcome": NegotiationOutcome.COUNTER.value,
+            "message": f"Counter offer: ${counter_offer:.2f}",
+            "target_rate": target_rate,
+            "floor_rate": floor_rate,
+            "counter_offer": counter_offer,
+            "round": round_number,
+            "max_rounds": self.max_rounds
+        }
     
-    def _calculate_counter_offer(self, listed_rate: float, current_offer: float, round_number: int) -> float:
+    def _calculate_intelligent_counter(self, listed_rate: float, carrier_offer: float, 
+                                      round_number: int, floor_rate: float) -> float:
         """
-        Calculate counter offer for rounds 1-2.
-        Round 3 uses floor rate, so this method only handles rounds 1-2.
+        Calculate an intelligent counter-offer that considers the carrier's offer.
         
         Strategy:
-        - Round 1: Counter at 97% of listed rate (higher initial counter)
-        - Round 2: Counter at 95% of listed rate (slight decrease to show flexibility)
+        - Round 1: Try for 98% of listed rate, but not less than carrier offer + 5%
+        - Round 2: Try for 96% of listed rate, but not less than carrier offer + 3%
+        - Round 3: Meet halfway between carrier offer and our minimum acceptable
         
         Args:
             listed_rate: Original listed rate
-            current_offer: Carrier's current offer (not used in calculation but available)
-            round_number: Current round (1 or 2)
+            carrier_offer: Carrier's current offer
+            round_number: Current round
+            floor_rate: Our minimum acceptable rate
             
         Returns:
             Counter offer amount rounded to nearest $10
         """
         if round_number == 1:
-            counter = listed_rate * 0.97  # 97% of listed rate - start higher
+            # First round: aim high but be reasonable
+            ideal_counter = listed_rate * 0.98
+            min_counter = carrier_offer * 1.05  # At least 5% above their offer
+            
         elif round_number == 2:
-            counter = listed_rate * 0.95  # 95% of listed rate - slight decrease
+            # Second round: show flexibility
+            ideal_counter = listed_rate * 0.96
+            min_counter = carrier_offer * 1.03  # At least 3% above their offer
+            
         else:
-            # Should not reach here for round 3+ but fallback
-            counter = listed_rate * self.floor_multiplier
-    
+            # Final rounds: meet halfway if possible
+            if carrier_offer >= floor_rate:
+                # Meet halfway between their offer and our target
+                ideal_counter = (carrier_offer + listed_rate * 0.95) / 2
+            else:
+                ideal_counter = floor_rate
+            min_counter = carrier_offer * 1.01  # Small increment
+        
+        # Choose the higher of ideal counter or minimum counter
+        counter = max(ideal_counter, min_counter)
+        
+        # But never go below our floor rate
+        counter = max(counter, floor_rate)
+        
+        # And never exceed the listed rate
+        counter = min(counter, listed_rate)
+        
         return self._round_to_nearest_10(counter)
     
     def _round_to_nearest_10(self, amount: float) -> float:
@@ -137,25 +200,19 @@ class NegotiationPolicy:
         """
         target_rate = listed_rate * self.target_multiplier
         floor_rate = listed_rate * self.floor_multiplier
-        round_1_counter = self._round_to_nearest_10(listed_rate * 0.97)
-        round_2_counter = self._round_to_nearest_10(listed_rate * 0.95)
-        round_3_counter = self._round_to_nearest_10(floor_rate)
+        acceptance_threshold = listed_rate * self.acceptance_threshold
         
         return {
             "listed_rate": listed_rate,
             "target_rate": target_rate,
             "floor_rate": floor_rate,
+            "acceptance_threshold": acceptance_threshold,
             "max_rounds": self.max_rounds,
-            "negotiation_progression": {
-                "round_1_counter": round_1_counter,
-                "round_2_counter": round_2_counter,
-                "round_3_counter": round_3_counter,
-                "round_4_outcome": "reject"
-            },
             "policy": {
                 "target_multiplier": self.target_multiplier,
                 "floor_multiplier": self.floor_multiplier,
-                "strategy": "4-round negotiation with decreasing counters ending at floor rate",
-                "description": "Counter at 97%, 95%, then floor rate (93%), then reject"
+                "acceptance_threshold_multiplier": self.acceptance_threshold,
+                "strategy": "Intelligent negotiation with carrier-aware counter-offers",
+                "description": "Accept >= 95% immediately, never counter below carrier offer, meet halfway in final rounds"
             }
         }

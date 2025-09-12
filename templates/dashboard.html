@@ -251,7 +251,7 @@
         }
         
         .badge.accepted { background: #d1fae5; color: #065f46; }
-        .badge.rejected { background: #f3f4f6; color: #6b7280; }
+        .badge.rejected { background: #f3f4f6; color: #f20909; }
         .badge.failed { background: #f3f4f6; color: #6b7280; }
         .badge.no-agreement { background: #f3f4f6; color: #6b7280; }
         .badge.incomplete { background: #f3f4f6; color: #6b7280; }
@@ -423,26 +423,6 @@
             </table>
         </div>
 
-        <!-- Carrier Intelligence -->
-        <div class="table-container">
-            <div class="chart-header">
-                <h3 class="chart-title">Top Performing Carriers</h3>
-            </div>
-            <table class="table" id="carriersTable">
-                <thead>
-                    <tr>
-                        <th>Carrier</th>
-                        <th>Total Calls</th>
-                        <th>Success Rate</th>
-                        <th>Avg Negotiation</th>
-                        <th>Sentiment Score</th>
-                    </tr>
-                </thead>
-                <tbody id="carriersTableBody">
-                    <tr><td colspan="5" style="text-align: center; padding: 2rem;">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
     </div>
 
     <!-- Update Notification -->
@@ -670,8 +650,6 @@
         // Update Tables
         function updateTables() {
             const recentCalls = dashboardData.recent_calls || [];
-            const metrics = dashboardData.dashboard || {};
-            const carriers = metrics.carrier_insights?.top_performers || [];
             
             // Update Recent Calls Table
             const callsBody = document.getElementById('callsTableBody');
@@ -683,29 +661,13 @@
                         <td>${call.carrier_mc || '--'}</td>
                         <td>${call.equipment_type || '--'}</td>
                         <td>${call.origin_preference || '--'} → ${call.destination_preference || '--'}</td>
-                        <td><span class="badge ${call.outcome}">${call.outcome || 'pending'}</span></td>
+                        <td><span class="badge ${call.outcome}">${call.outcome || 'no agreement'}</span></td>
                         <td>${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'}</td>
                         <td><span class="badge ${call.sentiment}">${call.sentiment || 'neutral'}</span></td>
                     </tr>
                 `).join('');
             } else {
                 callsBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">No recent calls</td></tr>';
-            }
-            
-            // Update Carriers Table
-            const carriersBody = document.getElementById('carriersTableBody');
-            if (carriers.length > 0) {
-                carriersBody.innerHTML = carriers.slice(0, 5).map(carrier => `
-                    <tr>
-                        <td><strong>${carrier.name}</strong><br><small>${carrier.mc}</small></td>
-                        <td>${carrier.calls}</td>
-                        <td>${carrier.success_rate.toFixed(1)}%</td>
-                        <td>${carrier.avg_negotiation_rounds || '--'}</td>
-                        <td>${carrier.sentiment_score || '--'}</td>
-                    </tr>
-                `).join('');
-            } else {
-                carriersBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No carrier data available</td></tr>';
             }
         }
         
@@ -775,8 +737,6 @@
             // Show loading in tables
             document.getElementById('callsTableBody').innerHTML = 
                 '<tr><td colspan="8" style="text-align: center; padding: 2rem;">Loading...</td></tr>';
-            document.getElementById('carriersTableBody').innerHTML = 
-                '<tr><td colspan="5" style="text-align: center; padding: 2rem;">Loading...</td></tr>';
         }
         
         // Show error state when data fails to load
@@ -792,8 +752,6 @@
             // Show error in tables
             document.getElementById('callsTableBody').innerHTML = 
                 '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading data: ' + errorMessage + '</td></tr>';
-            document.getElementById('carriersTableBody').innerHTML = 
-                '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading data</td></tr>';
             
             console.error('Dashboard error state:', errorMessage);
         }
@@ -818,7 +776,7 @@
                 csv += `${call.carrier_mc || ''},`;
                 csv += `${call.equipment_type || ''},`;
                 csv += `${call.origin_preference || ''} to ${call.destination_preference || ''},`;
-                csv += `${call.outcome || 'pending'},`;
+                csv += `${call.outcome || 'no agreement'},`;
                 csv += `${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'},`;
                 csv += `${call.sentiment || 'neutral'}\n`;
             });
