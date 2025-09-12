@@ -40,12 +40,23 @@ class Load(LoadBase):
         from_attributes = True
 
 class LoadSearchRequest(BaseModel):
+    # City-level preferences (most specific)
+    origin_city: Optional[str] = None
+    destination_city: Optional[str] = None
+    
+    # State-level preferences (broader matching)
     origin_state: Optional[str] = None
     destination_state: Optional[str] = None
+    
+    # Equipment and rate filters
     equipment_type: Optional[str] = None
     min_rate: Optional[float] = None
     max_rate: Optional[float] = None
     limit: int = Field(default=10, le=100)
+    
+    # Flexibility settings
+    flexible_origin: bool = Field(default=False, description="Allow nearby origin cities")
+    flexible_destination: bool = Field(default=False, description="Allow nearby destination cities")
 
 class LoadSearchResponse(BaseResponse):
     data: Optional[dict] = Field(None, description="Contains 'loads' list and 'total' count")

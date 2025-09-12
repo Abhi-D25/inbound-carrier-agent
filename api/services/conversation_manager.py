@@ -133,19 +133,22 @@ class ConversationManager:
             }
     
     def search_and_present_loads(self, call_id: str, equipment_type: str, 
-                                origin: str = None, destination: str = None) -> Dict[str, Any]:
-        """Search for loads and present the best match."""
+                           origin_city: str = None, origin_state: str = None,
+                           destination_city: str = None, destination_state: str = None) -> Dict[str, Any]:
+        """Search for loads with detailed city and state matching."""
         conversation = self.conversations.get(call_id)
         if not conversation:
             # Auto-initialize if conversation doesn't exist
             self.start_conversation(call_id)
             conversation = self.conversations[call_id]
         
-        # Search for loads
+        # Create enhanced search request
         search_request = LoadSearchRequest(
             equipment_type=equipment_type,
-            origin_state=origin,
-            destination_state=destination,
+            origin_city=origin_city,
+            origin_state=origin_state, 
+            destination_city=destination_city,
+            destination_state=destination_state,
             limit=5
         )
         
@@ -153,19 +156,42 @@ class ConversationManager:
         loads = search_results["loads"]
         
         if not loads:
+            # Store search preferences for fallback
+            conversation["data"]["search_preferences"] = {
+                "equipment_type": equipment_type,
+                "origin_city": origin_city,
+                "origin_state": origin_state,
+                "destination_city": destination_city, 
+                "destination_state": destination_state
+            }
+            
             conversation["state"] = ConversationState.FAILED
             self._save_conversations()
+            
+            # Provide helpful message about no matching loads
+            no_match_message = self._create_no_match_message(
+                equipment_type, origin_city, origin_state, 
+                destination_city, destination_state
+            )
+            
             return {
                 "call_id": call_id,
                 "state": ConversationState.FAILED.value,
-                "message": "I don't have any matching loads available right now. Let me transfer you to our load planning team.",
-                "next_action": "transfer_to_planning"
+                "message": no_match_message,
+                "next_action": "offer_alternatives_or_transfer"
             }
         
         # Present the best load
         best_load = loads[0]
         conversation["data"]["presented_load"] = best_load
         conversation["data"]["equipment_type"] = equipment_type
+        conversation["data"]["search_preferences"] = {
+            "equipment_type": equipment_type,
+            "origin_city": origin_city,
+            "origin_state": origin_state,
+            "destination_city": destination_city,
+            "destination_state": destination_state
+        }
         conversation["state"] = ConversationState.LOAD_PRESENTATION
         self._save_conversations()
         
@@ -174,6 +200,7 @@ class ConversationManager:
             "state": ConversationState.LOAD_PRESENTATION.value,
             "load": best_load,
             "message": self._format_load_presentation(best_load),
+            "search_summary": search_results.get("search_summary", {}),
             "next_action": "await_response"
         }
     
@@ -364,3 +391,27 @@ class ConversationManager:
         """Get current timestamp."""
         from datetime import datetime
         return datetime.utcnow().isoformat() + "Z"
+
+    def _create_no_match_message(self, equipment_type, origin_city, origin_state, 
+                           destination_city, destination_state) -> str:
+        """Create a helpful message when no loads match."""
+        location_str = ""
+        if origin_city and origin_state:
+            location_str += f"from {origin_city}, {origin_state}"
+        elif origin_state:
+            location_str += f"from {origin_state}"
+        
+        if destination_city and destination_state:
+            if location_str:
+                location_str += f" to {destination_city}, {destination_state}"
+            else:
+                location_str += f"to {destination_city}, {destination_state}"
+        elif destination_state:
+            if location_str:
+                location_str += f" to {destination_state}"
+            else:
+                location_str += f"to {destination_state}"
+        
+        return (f"I don't have any {equipment_type} loads available {location_str} right now. "
+                "Let me transfer you to our load planning team to see if we can find something "
+                "in nearby areas or check for new loads coming in.")    

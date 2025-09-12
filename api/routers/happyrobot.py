@@ -27,8 +27,10 @@ class VerifyMCRequest(BaseModel):
 class SearchLoadsRequest(BaseModel):
     call_id: str
     equipment_type: str = Field(..., description="Equipment type (Dry Van, Refrigerated, Flatbed)")
-    origin: Optional[str] = Field(None, description="Origin state or preference")
-    destination: Optional[str] = Field(None, description="Destination state or preference")
+    origin_city: Optional[str] = Field(None, description="Preferred origin city")
+    origin_state: Optional[str] = Field(None, description="Preferred origin state") 
+    destination_city: Optional[str] = Field(None, description="Preferred destination city")
+    destination_state: Optional[str] = Field(None, description="Preferred destination state")
 
 class NegotiateRequest(BaseModel):
     call_id: str
@@ -102,7 +104,7 @@ async def search_loads(
     db: Session = Depends(get_db)
 ):
     """
-    Search for loads and present the best match.
+    Search for loads with city and state matching.
     Returns load details formatted for voice presentation.
     """
     try:
@@ -115,8 +117,10 @@ async def search_loads(
         result = conversation_manager.search_and_present_loads(
             call_id=request.call_id,
             equipment_type=request.equipment_type,
-            origin=request.origin,
-            destination=request.destination
+            origin_city=request.origin_city,
+            origin_state=request.origin_state,
+            destination_city=request.destination_city,
+            destination_state=request.destination_state
         )
         
         return {
@@ -178,8 +182,36 @@ async def end_call(
         # Parse extracted data (from Extract node)
         extracted_data = request.get("extracted_data", {})
         
-        # Parse classification data (from Classify node)
+        # Parse classification data (from Classify node)  
         classification = request.get("classification", {})
+        
+        # Helper function to clean numeric values
+        def clean_numeric(value, default=None):
+            """Clean numeric values, converting empty strings to None/default"""
+            if value is None or value == "" or value == "null":
+                return default
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    return default
+            return value
+        
+        # Clean and convert extracted data
+        final_rate = clean_numeric(extracted_data.get("final_rate"))
+        negotiation_rounds = clean_numeric(extracted_data.get("negotiation_rounds"), 0)
+        
+        # Convert strings to proper types
+        if final_rate is not None:
+            try:
+                final_rate = float(final_rate)
+            except (ValueError, TypeError):
+                final_rate = None
+        
+        if negotiation_rounds is not None:
+            try:
+                negotiation_rounds = int(float(negotiation_rounds))  # Handle "0.0" strings
+            except (ValueError, TypeError):
+                negotiation_rounds = 0
         
         # Build call data for persistence
         call_data = {
@@ -189,10 +221,10 @@ async def end_call(
             "equipment_type": extracted_data.get("equipment_type"),
             "load_id": None,  # No load was presented in this case
             "listed_rate": None,
-            "final_rate": extracted_data.get("final_rate"),
-            "negotiation_rounds": extracted_data.get("negotiation_rounds", 0),
+            "final_rate": final_rate,
+            "negotiation_rounds": negotiation_rounds,
             "outcome": extracted_data.get("call_outcome", "failed"),
-            "sentiment": classification.get("classification", "neutral"),  # Get from classify node
+            "sentiment": classification.get("sentiment") or classification.get("classification", "neutral"),
             "extracted_json": {
                 "origin_preference": extracted_data.get("origin_preference"),
                 "destination_preference": extracted_data.get("destination_preference"),

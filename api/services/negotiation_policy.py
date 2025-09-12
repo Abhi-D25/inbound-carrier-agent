@@ -14,20 +14,20 @@ class NegotiationPolicy:
     """Policy engine for load negotiations."""
     
     def __init__(self):
-        self.max_rounds = 3
-        self.target_multiplier = 1.0  # Target equals listed rate
+        self.max_rounds = 4  # Allow 4 rounds: 2 standard counters + 1 floor rate + 1 reject
+        self.target_multiplier = 1.0  # Target equals listed rate (100%)
         self.floor_multiplier = 0.93  # Floor equals 93% of listed rate
     
     def evaluate_offer(self, listed_rate: float, offer: float, round_number: int) -> Dict[str, Any]:
         """
-        Evaluate a carrier's offer and determine the response.
+        Evaluate a carrier's offer with 4-round negotiation strategy.
         
-        Policy:
-        - Target = listed rate (100%)
-        - Floor = 93% of listed rate
-        - Accept if offer >= target
-        - Counter if offer >= floor and rounds < max
-        - Reject if offer < floor or max rounds reached
+        Strategy:
+        - Round 1: Counter at 97% of listed rate (higher initial counter)
+        - Round 2: Counter at 95% of listed rate (slight decrease to show flexibility)
+        - Round 3: Counter with floor rate (93%) as final offer
+        - Round 4+: Reject any further negotiations
+        - Accept immediately if offer >= target at any point
         
         Args:
             listed_rate: The original listed rate for the load
@@ -40,19 +40,7 @@ class NegotiationPolicy:
         target_rate = listed_rate * self.target_multiplier
         floor_rate = listed_rate * self.floor_multiplier
         
-        # Check if max rounds reached
-        if round_number >= self.max_rounds:
-            return {
-                "outcome": NegotiationOutcome.MAX_ROUNDS_REACHED.value,
-                "message": f"Maximum rounds ({self.max_rounds}) reached",
-                "target_rate": target_rate,
-                "floor_rate": floor_rate,
-                "counter_offer": None,
-                "round": round_number,
-                "max_rounds": self.max_rounds
-            }
-        
-        # Accept if offer meets or exceeds target
+        # Accept immediately if offer meets or exceeds target (any round)
         if offer >= target_rate:
             return {
                 "outcome": NegotiationOutcome.ACCEPT.value,
@@ -64,49 +52,78 @@ class NegotiationPolicy:
                 "max_rounds": self.max_rounds
             }
         
-        # Reject if offer below floor
-        if offer < floor_rate:
+        # Handle negotiation rounds
+        if round_number <= 2:
+            # Rounds 1-2: Always counter with standard progression
+            counter_offer = self._calculate_counter_offer(listed_rate, offer, round_number)
+            
+            return {
+                "outcome": NegotiationOutcome.COUNTER.value,
+                "message": f"Counter offer: ${counter_offer:.2f}",
+                "target_rate": target_rate,
+                "floor_rate": floor_rate,
+                "counter_offer": counter_offer,
+                "round": round_number,
+                "max_rounds": self.max_rounds
+            }
+        
+        elif round_number == 3:
+            # Round 3: Final counter with floor rate
+            counter_offer = self._round_to_nearest_10(floor_rate)
+            
+            return {
+                "outcome": NegotiationOutcome.COUNTER.value,
+                "message": f"Final offer: ${counter_offer:.2f} - this is our absolute minimum",
+                "target_rate": target_rate,
+                "floor_rate": floor_rate,
+                "counter_offer": counter_offer,
+                "round": round_number,
+                "max_rounds": self.max_rounds,
+                "is_final_offer": True
+            }
+        
+        else:
+            # Round 4+: No more negotiations, reject
             return {
                 "outcome": NegotiationOutcome.REJECT.value,
-                "message": f"Offer rejected - below floor rate (${floor_rate:.2f})",
+                "message": f"We've reached our maximum negotiations. Cannot accept below ${floor_rate:.2f}",
                 "target_rate": target_rate,
                 "floor_rate": floor_rate,
                 "counter_offer": None,
                 "round": round_number,
                 "max_rounds": self.max_rounds
             }
-        
-        # Counter offer - between floor and target
-        counter_offer = self._calculate_counter_offer(listed_rate, offer, round_number)
-        
-        return {
-            "outcome": NegotiationOutcome.COUNTER.value,
-            "message": f"Counter offer: ${counter_offer:.2f}",
-            "target_rate": target_rate,
-            "floor_rate": floor_rate,
-            "counter_offer": counter_offer,
-            "round": round_number,
-            "max_rounds": self.max_rounds
-        }
     
     def _calculate_counter_offer(self, listed_rate: float, current_offer: float, round_number: int) -> float:
         """
-        Calculate a counter offer based on the current offer and round.
+        Calculate counter offer for rounds 1-2.
+        Round 3 uses floor rate, so this method only handles rounds 1-2.
         
         Strategy:
-        - Round 1: Counter at 95% of listed rate
-        - Round 2: Counter at 97% of listed rate  
-        - Round 3: Counter at 99% of listed rate
+        - Round 1: Counter at 97% of listed rate (higher initial counter)
+        - Round 2: Counter at 95% of listed rate (slight decrease to show flexibility)
+        
+        Args:
+            listed_rate: Original listed rate
+            current_offer: Carrier's current offer (not used in calculation but available)
+            round_number: Current round (1 or 2)
+            
+        Returns:
+            Counter offer amount rounded to nearest $10
         """
         if round_number == 1:
-            counter = listed_rate * 0.95
+            counter = listed_rate * 0.97  # 97% of listed rate - start higher
         elif round_number == 2:
-            counter = listed_rate * 0.97
+            counter = listed_rate * 0.95  # 95% of listed rate - slight decrease
         else:
-            counter = listed_rate * 0.99
+            # Should not reach here for round 3+ but fallback
+            counter = listed_rate * self.floor_multiplier
     
-        # Round to nearest $10
-        return round(counter / 10) * 10
+        return self._round_to_nearest_10(counter)
+    
+    def _round_to_nearest_10(self, amount: float) -> float:
+        """Round amount to nearest $10."""
+        return round(amount / 10) * 10
     
     def get_negotiation_summary(self, listed_rate: float) -> Dict[str, Any]:
         """
@@ -118,14 +135,27 @@ class NegotiationPolicy:
         Returns:
             Dictionary with negotiation parameters
         """
+        target_rate = listed_rate * self.target_multiplier
+        floor_rate = listed_rate * self.floor_multiplier
+        round_1_counter = self._round_to_nearest_10(listed_rate * 0.97)
+        round_2_counter = self._round_to_nearest_10(listed_rate * 0.95)
+        round_3_counter = self._round_to_nearest_10(floor_rate)
+        
         return {
             "listed_rate": listed_rate,
-            "target_rate": listed_rate * self.target_multiplier,
-            "floor_rate": listed_rate * self.floor_multiplier,
+            "target_rate": target_rate,
+            "floor_rate": floor_rate,
             "max_rounds": self.max_rounds,
+            "negotiation_progression": {
+                "round_1_counter": round_1_counter,
+                "round_2_counter": round_2_counter,
+                "round_3_counter": round_3_counter,
+                "round_4_outcome": "reject"
+            },
             "policy": {
                 "target_multiplier": self.target_multiplier,
                 "floor_multiplier": self.floor_multiplier,
-                "description": "Accept at target (100%), counter between floor (93%) and target, reject below floor"
+                "strategy": "4-round negotiation with decreasing counters ending at floor rate",
+                "description": "Counter at 97%, 95%, then floor rate (93%), then reject"
             }
         }

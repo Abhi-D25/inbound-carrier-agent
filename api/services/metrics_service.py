@@ -1,28 +1,28 @@
-# api/services/metrics_service.py
+# Enhanced api/services/metrics_service.py
 """
-Metrics calculation service for KPI dashboard.
+Comprehensive metrics calculation service for KPI dashboard.
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, text
 from api.models import Call, Load
 
 class MetricsService:
-    """Service for calculating KPI metrics from call data."""
+    """Service for calculating comprehensive KPI metrics from call data."""
     
     def __init__(self, db: Session):
         self.db = db
     
-    def get_summary_metrics(self, days: int = 30) -> Dict[str, Any]:
+    def get_dashboard_metrics(self, days: int = 30) -> Dict[str, Any]:
         """
-        Get comprehensive metrics summary for the last N days.
+        Get comprehensive dashboard metrics optimized for display.
         
         Args:
-            days: Number of days to look back
+            days: Number of days to analyze
             
         Returns:
-            Dictionary with all KPI metrics
+            Dictionary with all dashboard metrics organized by category
         """
         end_date = datetime.utcnow()
         start_date = end_date - timedelta(days=days)
@@ -33,355 +33,269 @@ class MetricsService:
             Call.created_at <= end_date
         )
         
-        # Basic call metrics
-        total_calls = calls_query.count()
-        completed_calls = calls_query.filter(Call.outcome.in_(["accepted", "rejected"])).count()
-        successful_calls = calls_query.filter(Call.outcome == "accepted").count()
-        
-        # Calculate rates
-        acceptance_rate = (successful_calls / total_calls * 100) if total_calls > 0 else 0
-        completion_rate = (completed_calls / total_calls * 100) if total_calls > 0 else 0
-        
-        # Duration metrics
-        duration_stats = self._calculate_duration_stats(calls_query)
-        
-        # Negotiation metrics
-        negotiation_stats = self._calculate_negotiation_stats(calls_query)
-        
-        # Revenue metrics
-        revenue_stats = self._calculate_revenue_stats(calls_query)
-        
-        # Carrier metrics
-        carrier_stats = self._calculate_carrier_stats(calls_query)
-        
-        # Time-based metrics
-        time_stats = self._calculate_time_based_stats(calls_query, days)
+        all_calls = calls_query.all()
         
         return {
             "period": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
                 "days": days
             },
-            "call_metrics": {
-                "total_calls": total_calls,
-                "completed_calls": completed_calls,
-                "successful_calls": successful_calls,
-                "acceptance_rate": round(acceptance_rate, 2),
-                "completion_rate": round(completion_rate, 2)
-            },
-            "duration_metrics": duration_stats,
-            "negotiation_metrics": negotiation_stats,
-            "revenue_metrics": revenue_stats,
-            "carrier_metrics": carrier_stats,
-            "time_metrics": time_stats
+            "overview": self._get_overview_metrics(all_calls),
+            "performance": self._get_performance_metrics(all_calls),
+            "financial": self._get_financial_metrics(all_calls),
+            "operational": self._get_operational_metrics(all_calls),
+            "carrier_insights": self._get_carrier_metrics(all_calls),
+            "trends": self._get_trend_data(all_calls, days)
         }
     
-    def _calculate_duration_stats(self, calls_query) -> Dict[str, Any]:
-        """Calculate call duration statistics."""
-        durations = [
-            call.call_duration_seconds 
-            for call in calls_query.all() 
-            if call.call_duration_seconds is not None
-        ]
+    def _get_overview_metrics(self, calls: List[Call]) -> Dict[str, Any]:
+        """High-level overview metrics for the dashboard header."""
+        total_calls = len(calls)
+        successful_calls = len([c for c in calls if c.outcome == "accepted"])
+        completed_calls = len([c for c in calls if c.outcome in ["accepted", "rejected", "no_agreement"]])
         
-        if not durations:
-            return {
-                "average_duration_seconds": 0,
-                "average_duration_minutes": 0,
-                "min_duration_seconds": 0,
-                "max_duration_seconds": 0,
-                "total_call_time_minutes": 0
-            }
+        # Calculate rates
+        success_rate = (successful_calls / total_calls * 100) if total_calls > 0 else 0
+        completion_rate = (completed_calls / total_calls * 100) if total_calls > 0 else 0
         
-        avg_duration = sum(durations) / len(durations)
-        total_time = sum(durations)
+        # Total revenue from successful calls
+        total_revenue = sum([c.final_rate or 0 for c in calls if c.outcome == "accepted" and c.final_rate])
+        
+        # Average call duration
+        durations = [c.call_duration_seconds for c in calls if c.call_duration_seconds]
+        avg_duration = sum(durations) / len(durations) if durations else 0
         
         return {
-            "average_duration_seconds": round(avg_duration, 1),
-            "average_duration_minutes": round(avg_duration / 60, 1),
-            "min_duration_seconds": min(durations),
-            "max_duration_seconds": max(durations),
-            "total_call_time_minutes": round(total_time / 60, 1)
+            "total_calls": total_calls,
+            "successful_calls": successful_calls,
+            "success_rate": round(success_rate, 1),
+            "completion_rate": round(completion_rate, 1),
+            "total_revenue": round(total_revenue, 2),
+            "avg_call_duration_minutes": round(avg_duration / 60, 1) if avg_duration else 0
         }
     
-    def _calculate_negotiation_stats(self, calls_query) -> Dict[str, Any]:
-        """Calculate negotiation-related statistics."""
-        all_calls = calls_query.all()
+    def _get_performance_metrics(self, calls: List[Call]) -> Dict[str, Any]:
+        """Agent and system performance metrics."""
         
-        negotiation_rounds = [
-            call.negotiation_rounds 
-            for call in all_calls 
-            if call.negotiation_rounds is not None
-        ]
+        # Outcome breakdown
+        outcome_counts = {}
+        for call in calls:
+            outcome = call.outcome or "unknown"
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
         
-        if not negotiation_rounds:
-            return {
-                "average_negotiation_rounds": 0,
-                "max_negotiation_rounds": 0,
-                "calls_with_negotiation": 0,
-                "negotiation_success_rate": 0
-            }
+        # Sentiment breakdown
+        sentiment_counts = {}
+        for call in calls:
+            sentiment = call.sentiment or "neutral"
+            sentiment_counts[sentiment] = sentiment_counts.get(sentiment, 0) + 1
         
-        calls_with_negotiation = len([r for r in negotiation_rounds if r > 0])
-        negotiated_and_accepted = len([
-            call for call in all_calls 
-            if call.negotiation_rounds > 0 and call.outcome == "accepted"
-        ])
+        # Negotiation effectiveness
+        negotiated_calls = [c for c in calls if (c.negotiation_rounds or 0) > 0]
+        negotiated_successes = [c for c in negotiated_calls if c.outcome == "accepted"]
+        negotiation_success_rate = (len(negotiated_successes) / len(negotiated_calls) * 100) if negotiated_calls else 0
         
-        negotiation_success_rate = (
-            negotiated_and_accepted / calls_with_negotiation * 100
-        ) if calls_with_negotiation > 0 else 0
+        # Average negotiation rounds
+        rounds = [c.negotiation_rounds for c in calls if c.negotiation_rounds]
+        avg_negotiation_rounds = sum(rounds) / len(rounds) if rounds else 0
         
         return {
-            "average_negotiation_rounds": round(sum(negotiation_rounds) / len(negotiation_rounds), 2),
-            "max_negotiation_rounds": max(negotiation_rounds),
-            "calls_with_negotiation": calls_with_negotiation,
-            "negotiation_success_rate": round(negotiation_success_rate, 2)
+            "outcome_breakdown": outcome_counts,
+            "sentiment_breakdown": sentiment_counts,
+            "negotiation_success_rate": round(negotiation_success_rate, 1),
+            "avg_negotiation_rounds": round(avg_negotiation_rounds, 1),
+            "calls_with_negotiation": len(negotiated_calls)
         }
     
-    def _calculate_revenue_stats(self, calls_query) -> Dict[str, Any]:
-        """Calculate revenue-related statistics."""
-        successful_calls = calls_query.filter(Call.outcome == "accepted").all()
+    def _get_financial_metrics(self, calls: List[Call]) -> Dict[str, Any]:
+        """Financial and revenue-related metrics."""
+        successful_calls = [c for c in calls if c.outcome == "accepted" and c.final_rate]
         
         if not successful_calls:
             return {
                 "total_revenue": 0,
                 "average_deal_size": 0,
-                "average_rate_per_mile": 0,
-                "revenue_per_call": 0
+                "revenue_per_call": 0,
+                "deals_by_size": {"small": 0, "medium": 0, "large": 0},
+                "rate_analysis": {}
             }
         
-        # Calculate revenue from successful calls
-        revenues = []
-        rates_per_mile = []
-        
-        for call in successful_calls:
-            if call.final_rate:
-                revenues.append(call.final_rate)
-                
-                # Calculate rate per mile if we have load data
-                if call.load and call.load.miles:
-                    rate_per_mile = call.final_rate / call.load.miles
-                    rates_per_mile.append(rate_per_mile)
-        
+        revenues = [c.final_rate for c in successful_calls]
         total_revenue = sum(revenues)
-        avg_deal_size = sum(revenues) / len(revenues) if revenues else 0
-        avg_rate_per_mile = sum(rates_per_mile) / len(rates_per_mile) if rates_per_mile else 0
+        avg_deal_size = total_revenue / len(revenues)
+        revenue_per_call = total_revenue / len(calls) if calls else 0
         
-        # Revenue per call (including unsuccessful calls)
-        total_calls = calls_query.count()
-        revenue_per_call = total_revenue / total_calls if total_calls > 0 else 0
+        # Deal size categories
+        deals_by_size = {"small": 0, "medium": 0, "large": 0}
+        for revenue in revenues:
+            if revenue < 1500:
+                deals_by_size["small"] += 1
+            elif revenue < 3000:
+                deals_by_size["medium"] += 1
+            else:
+                deals_by_size["large"] += 1
+        
+        # Rate analysis
+        rate_analysis = {
+            "min_deal": min(revenues),
+            "max_deal": max(revenues),
+            "median_deal": sorted(revenues)[len(revenues)//2],
+            "total_deals": len(successful_calls)
+        }
         
         return {
             "total_revenue": round(total_revenue, 2),
             "average_deal_size": round(avg_deal_size, 2),
-            "average_rate_per_mile": round(avg_rate_per_mile, 2),
-            "revenue_per_call": round(revenue_per_call, 2)
+            "revenue_per_call": round(revenue_per_call, 2),
+            "deals_by_size": deals_by_size,
+            "rate_analysis": rate_analysis
         }
     
-    def _calculate_carrier_stats(self, calls_query) -> Dict[str, Any]:
-        """Calculate carrier-related statistics."""
-        all_calls = calls_query.all()
+    def _get_operational_metrics(self, calls: List[Call]) -> Dict[str, Any]:
+        """Operational efficiency and equipment metrics."""
         
-        # Unique carriers
-        unique_carriers = set(call.carrier_mc for call in all_calls if call.carrier_mc)
+        # Equipment type performance
+        equipment_stats = {}
+        for call in calls:
+            if call.extracted_json:
+                import json
+                try:
+                    data = json.loads(call.extracted_json) if isinstance(call.extracted_json, str) else call.extracted_json
+                    equipment = data.get("equipment_type")
+                    if equipment:
+                        if equipment not in equipment_stats:
+                            equipment_stats[equipment] = {"total": 0, "successful": 0}
+                        equipment_stats[equipment]["total"] += 1
+                        if call.outcome == "accepted":
+                            equipment_stats[equipment]["successful"] += 1
+                except:
+                    pass
+        
+        # Calculate success rates by equipment
+        for equipment, stats in equipment_stats.items():
+            stats["success_rate"] = (stats["successful"] / stats["total"] * 100) if stats["total"] > 0 else 0
         
         # FMCSA verification stats
-        verified_calls = [call for call in all_calls if call.fmcsa_status]
-        verification_statuses = [call.fmcsa_status for call in verified_calls]
+        verified_calls = [c for c in calls if c.fmcsa_status]
+        verification_rate = (len(verified_calls) / len(calls) * 100) if calls else 0
         
-        active_carriers = len([s for s in verification_statuses if s.lower() == "active"])
-        verification_success_rate = (
-            active_carriers / len(verification_statuses) * 100
-        ) if verification_statuses else 0
+        # Peak activity analysis
+        hourly_activity = {}
+        daily_activity = {}
         
-        # Repeat carriers
-        carrier_call_counts = {}
-        for call in all_calls:
+        for call in calls:
+            if call.created_at:
+                hour = call.created_at.hour
+                day = call.created_at.strftime("%A")
+                
+                hourly_activity[hour] = hourly_activity.get(hour, 0) + 1
+                daily_activity[day] = daily_activity.get(day, 0) + 1
+        
+        peak_hour = max(hourly_activity.items(), key=lambda x: x[1]) if hourly_activity else (0, 0)
+        peak_day = max(daily_activity.items(), key=lambda x: x[1]) if daily_activity else ("", 0)
+        
+        return {
+            "equipment_performance": equipment_stats,
+            "verification_rate": round(verification_rate, 1),
+            "peak_activity": {
+                "peak_hour": f"{peak_hour[0]}:00 ({peak_hour[1]} calls)",
+                "peak_day": f"{peak_day[0]} ({peak_day[1]} calls)",
+                "hourly_distribution": hourly_activity,
+                "daily_distribution": daily_activity
+            }
+        }
+    
+    def _get_carrier_metrics(self, calls: List[Call]) -> Dict[str, Any]:
+        """Carrier-related insights and patterns."""
+        
+        # Unique carriers
+        unique_carriers = set()
+        carrier_performance = {}
+        
+        for call in calls:
             if call.carrier_mc:
-                carrier_call_counts[call.carrier_mc] = carrier_call_counts.get(call.carrier_mc, 0) + 1
+                unique_carriers.add(call.carrier_mc)
+                
+                if call.carrier_mc not in carrier_performance:
+                    carrier_performance[call.carrier_mc] = {
+                        "name": call.carrier_name or "Unknown",
+                        "total_calls": 0,
+                        "successful_calls": 0,
+                        "total_revenue": 0
+                    }
+                
+                stats = carrier_performance[call.carrier_mc]
+                stats["total_calls"] += 1
+                
+                if call.outcome == "accepted":
+                    stats["successful_calls"] += 1
+                    if call.final_rate:
+                        stats["total_revenue"] += call.final_rate
         
-        repeat_carriers = len([mc for mc, count in carrier_call_counts.items() if count > 1])
+        # Calculate success rates and sort by performance
+        for mc, stats in carrier_performance.items():
+            stats["success_rate"] = (stats["successful_calls"] / stats["total_calls"] * 100) if stats["total_calls"] > 0 else 0
+        
+        # Get top performers
+        top_carriers = sorted(
+            carrier_performance.items(), 
+            key=lambda x: (x[1]["successful_calls"], x[1]["total_revenue"]), 
+            reverse=True
+        )[:5]
+        
+        # Repeat vs new carriers
+        repeat_carriers = len([mc for mc, stats in carrier_performance.items() if stats["total_calls"] > 1])
         
         return {
             "unique_carriers": len(unique_carriers),
             "repeat_carriers": repeat_carriers,
-            "verification_success_rate": round(verification_success_rate, 2),
-            "most_active_carriers": self._get_top_carriers(carrier_call_counts, 5)
-        }
-    
-    def _calculate_time_based_stats(self, calls_query, days: int) -> Dict[str, Any]:
-        """Calculate time-based patterns."""
-        all_calls = calls_query.all()
-        
-        # Calls by day of week
-        calls_by_day = {}
-        calls_by_hour = {}
-        
-        for call in all_calls:
-            if call.created_at:
-                day_name = call.created_at.strftime("%A")
-                hour = call.created_at.hour
-                
-                calls_by_day[day_name] = calls_by_day.get(day_name, 0) + 1
-                calls_by_hour[hour] = calls_by_hour.get(hour, 0) + 1
-        
-        # Peak hours
-        peak_hour = max(calls_by_hour.items(), key=lambda x: x[1]) if calls_by_hour else (0, 0)
-        peak_day = max(calls_by_day.items(), key=lambda x: x[1]) if calls_by_day else ("", 0)
-        
-        return {
-            "calls_by_day": calls_by_day,
-            "calls_by_hour": calls_by_hour,
-            "peak_hour": f"{peak_hour[0]}:00 ({peak_hour[1]} calls)",
-            "peak_day": f"{peak_day[0]} ({peak_day[1]} calls)"
-        }
-    
-    def _get_top_carriers(self, carrier_counts: dict, limit: int) -> List[Dict[str, Any]]:
-        """Get top carriers by call volume."""
-        sorted_carriers = sorted(carrier_counts.items(), key=lambda x: x[1], reverse=True)
-        return [
-            {"mc_number": mc, "call_count": count}
-            for mc, count in sorted_carriers[:limit]
-        ]
-    
-    def get_detailed_metrics(self, days: int = 30) -> Dict[str, Any]:
-        """
-        Get detailed metrics with breakdowns and trends.
-        
-        Args:
-            days: Number of days to analyze
-            
-        Returns:
-            Detailed metrics with trends and breakdowns
-        """
-        base_metrics = self.get_summary_metrics(days)
-        
-        # Add trend analysis
-        trend_metrics = self._calculate_trends(days)
-        
-        # Add outcome breakdown
-        outcome_breakdown = self._get_outcome_breakdown(days)
-        
-        # Add load type analysis
-        load_analysis = self._get_load_type_analysis(days)
-        
-        return {
-            **base_metrics,
-            "trends": trend_metrics,
-            "outcome_breakdown": outcome_breakdown,
-            "load_analysis": load_analysis
-        }
-    
-    def _calculate_trends(self, days: int) -> Dict[str, Any]:
-        """Calculate week-over-week trends."""
-        current_period = self.get_summary_metrics(days // 2)  # Last half of period
-        previous_period = self._get_period_metrics(days, days // 2)  # Previous half
-        
-        # Calculate percentage changes
-        trends = {}
-        for key in ["total_calls", "successful_calls", "acceptance_rate"]:
-            current = current_period["call_metrics"][key]
-            previous = previous_period["call_metrics"][key]
-            
-            if previous > 0:
-                change = ((current - previous) / previous) * 100
-                trends[f"{key}_change"] = round(change, 1)
-            else:
-                trends[f"{key}_change"] = 0
-        
-        return trends
-    
-    def _get_period_metrics(self, total_days: int, offset_days: int) -> Dict[str, Any]:
-        """Get metrics for a specific period offset."""
-        end_date = datetime.utcnow() - timedelta(days=offset_days)
-        start_date = end_date - timedelta(days=total_days // 2)
-        
-        calls_query = self.db.query(Call).filter(
-            Call.created_at >= start_date,
-            Call.created_at <= end_date
-        )
-        
-        total_calls = calls_query.count()
-        successful_calls = calls_query.filter(Call.outcome == "accepted").count()
-        acceptance_rate = (successful_calls / total_calls * 100) if total_calls > 0 else 0
-        
-        return {
-            "call_metrics": {
-                "total_calls": total_calls,
-                "successful_calls": successful_calls,
-                "acceptance_rate": acceptance_rate
-            }
-        }
-    
-    def _get_outcome_breakdown(self, days: int) -> Dict[str, Any]:
-        """Get detailed breakdown of call outcomes."""
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        outcome_counts = (
-            self.db.query(Call.outcome, func.count(Call.id))
-            .filter(Call.created_at >= start_date)
-            .group_by(Call.outcome)
-            .all()
-        )
-        
-        sentiment_counts = (
-            self.db.query(Call.sentiment, func.count(Call.id))
-            .filter(Call.created_at >= start_date)
-            .filter(Call.sentiment.isnot(None))
-            .group_by(Call.sentiment)
-            .all()
-        )
-        
-        return {
-            "outcomes": {outcome: count for outcome, count in outcome_counts},
-            "sentiments": {sentiment: count for sentiment, count in sentiment_counts}
-        }
-    
-    def _get_load_type_analysis(self, days: int) -> Dict[str, Any]:
-        """Analyze performance by load type."""
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-        
-        # Get calls with associated loads
-        calls_with_loads = (
-            self.db.query(Call)
-            .join(Load, Call.load_id == Load.load_id)
-            .filter(Call.created_at >= start_date)
-            .all()
-        )
-        
-        equipment_stats = {}
-        for call in calls_with_loads:
-            equipment = call.load.equipment_type
-            if equipment not in equipment_stats:
-                equipment_stats[equipment] = {
-                    "total_calls": 0,
-                    "successful_calls": 0,
-                    "total_revenue": 0
+            "new_carriers": len(unique_carriers) - repeat_carriers,
+            "top_performers": [
+                {
+                    "mc": mc,
+                    "name": stats["name"],
+                    "calls": stats["total_calls"],
+                    "success_rate": round(stats["success_rate"], 1),
+                    "revenue": round(stats["total_revenue"], 2)
                 }
-            
-            equipment_stats[equipment]["total_calls"] += 1
-            if call.outcome == "accepted":
-                equipment_stats[equipment]["successful_calls"] += 1
-                if call.final_rate:
-                    equipment_stats[equipment]["total_revenue"] += call.final_rate
+                for mc, stats in top_carriers
+            ]
+        }
+    
+    def _get_trend_data(self, calls: List[Call], days: int) -> Dict[str, Any]:
+        """Trend analysis for charts and graphs."""
         
-        # Calculate success rates
-        for equipment, stats in equipment_stats.items():
-            if stats["total_calls"] > 0:
-                stats["success_rate"] = round(
-                    (stats["successful_calls"] / stats["total_calls"]) * 100, 2
-                )
-            else:
-                stats["success_rate"] = 0
+        # Daily trends
+        daily_stats = {}
+        for call in calls:
+            date_key = call.created_at.strftime("%Y-%m-%d")
+            if date_key not in daily_stats:
+                daily_stats[date_key] = {"total": 0, "successful": 0, "revenue": 0}
+            
+            daily_stats[date_key]["total"] += 1
+            if call.outcome == "accepted":
+                daily_stats[date_key]["successful"] += 1
+                if call.final_rate:
+                    daily_stats[date_key]["revenue"] += call.final_rate
+        
+        # Convert to arrays for charting
+        dates = sorted(daily_stats.keys())
+        daily_calls = [daily_stats[date]["total"] for date in dates]
+        daily_successes = [daily_stats[date]["successful"] for date in dates]
+        daily_revenue = [round(daily_stats[date]["revenue"], 2) for date in dates]
         
         return {
-            "equipment_performance": equipment_stats,
-            "best_performing_equipment": max(
-                equipment_stats.items(), 
-                key=lambda x: x[1]["success_rate"]
-            )[0] if equipment_stats else None
+            "daily_trends": {
+                "dates": dates,
+                "calls": daily_calls,
+                "successes": daily_successes,
+                "revenue": daily_revenue
+            },
+            "summary": {
+                "total_days_with_activity": len([d for d in daily_calls if d > 0]),
+                "best_day": {
+                    "date": dates[daily_calls.index(max(daily_calls))] if daily_calls else None,
+                    "calls": max(daily_calls) if daily_calls else 0
+                }
+            }
         }

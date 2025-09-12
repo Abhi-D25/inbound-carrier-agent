@@ -1,208 +1,65 @@
 """
-Load search and ranking service.
+Load search and ranking service with enhanced city and state matching.
 """
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from api.models import Load
 from api.schemas import LoadSearchRequest
 
 class LoadSearchService:
-    """Service for searching and ranking loads."""
+    """Service for searching and ranking loads with city and state prioritization."""
     
     def __init__(self, db: Session):
         self.db = db
     
     def search_loads(self, search_request: LoadSearchRequest) -> dict:
         """
-        Search for loads with improved location matching.
+        Enhanced search for loads with city and state matching priority.
+        
+        Matching Priority:
+        1. Exact city + state match (100 points)
+        2. City match (any state) (60-80 points)
+        3. State match (any city) (40-70 points)
+        4. Equipment type only (20+ points)
         
         Args:
-            search_request: Search criteria
+            search_request: Search criteria with city/state preferences
             
         Returns:
-            Dictionary with loads list and total count
+            Dictionary with ranked loads and search metadata
         """
-        # Build query
+        # Build base query
         query = self.db.query(Load).filter(Load.is_active == True)
         
-        # Apply equipment filter first (most specific)
+        # Apply equipment filter first (most important)
         if search_request.equipment_type:
             query = query.filter(Load.equipment_type.ilike(f"%{search_request.equipment_type}%"))
-        
-        # Improved origin state matching
-        if search_request.origin_state:
-            origin_pattern = self._normalize_state_input(search_request.origin_state)
-            query = query.filter(
-                or_(
-                    Load.origin_state.ilike(f"%{origin_pattern}%"),
-                    Load.origin_city.ilike(f"%{origin_pattern}%")
-                )
-            )
-        
-        # Improved destination state matching  
-        if search_request.destination_state:
-            dest_pattern = self._normalize_state_input(search_request.destination_state)
-            query = query.filter(
-                or_(
-                    Load.destination_state.ilike(f"%{dest_pattern}%"),
-                    Load.destination_city.ilike(f"%{dest_pattern}%")
-                )
-            )
         
         # Apply rate filters
         if search_request.min_rate:
             query = query.filter(Load.rate_per_mile >= search_request.min_rate)
-        
         if search_request.max_rate:
             query = query.filter(Load.rate_per_mile <= search_request.max_rate)
         
-        # Get total count before ranking
-        total_count = query.count()
+        # Get all matching loads and score them
+        all_loads = query.all()
+        scored_loads = []
         
-        # Apply ranking and limit
-        loads = self._rank_and_limit_loads(query, search_request.limit)
+        for load in all_loads:
+            location_score = self._calculate_location_score(load, search_request)
+            if location_score > 0:  # Only include loads with some relevance
+                scored_loads.append((load, location_score))
         
-        return {
-            "loads": loads,
-            "total": total_count,
-            "search_summary": self._create_search_summary(search_request, loads),
-            "filters_applied": {
-                "origin_state": search_request.origin_state,
-                "destination_state": search_request.destination_state,
-                "equipment_type": search_request.equipment_type,
-                "min_rate": search_request.min_rate,
-                "max_rate": search_request.max_rate,
-                "limit": search_request.limit
-            }
-        }
-    
-    def _normalize_state_input(self, location_input: str) -> str:
-        """
-        Normalize location input to handle both state names and abbreviations.
+        # Sort by location score (desc), then by profitability score (desc)
+        scored_loads.sort(key=lambda x: (-x[1], -x[0].rate_per_mile))
         
-        Args:
-            location_input: User input for location (state name, abbreviation, or city)
-            
-        Returns:
-            Normalized location string for database matching
-        """
-        if not location_input:
-            return ""
-        
-        # State name to abbreviation mapping
-        state_mapping = {
-            "texas": "TX", "georgia": "GA", "california": "CA", "florida": "FL",
-            "illinois": "IL", "colorado": "CO", "tennessee": "TN", "washington": "WA",
-            "oregon": "OR", "arizona": "AZ", "new york": "NY", "nevada": "NV",
-            "north carolina": "NC", "south carolina": "SC", "alabama": "AL",
-            "mississippi": "MS", "louisiana": "LA", "arkansas": "AR", "oklahoma": "OK",
-            "kansas": "KS", "nebraska": "NE", "missouri": "MO", "iowa": "IA",
-            "minnesota": "MN", "wisconsin": "WI", "michigan": "MI", "indiana": "IN",
-            "ohio": "OH", "kentucky": "KY", "pennsylvania": "PA", "new jersey": "NJ",
-            "virginia": "VA", "west virginia": "WV", "maryland": "MD", "delaware": "DE"
-        }
-        
-        location_lower = location_input.lower().strip()
-        
-        # If it's a full state name, convert to abbreviation
-        if location_lower in state_mapping:
-            return state_mapping[location_lower]
-        
-        # If it's already an abbreviation (2 letters), return uppercase
-        if len(location_input.strip()) == 2:
-            return location_input.upper()
-        
-        # If it's a city name or other input, return as-is for city matching
-        return location_input.title()
-    
-    def _create_search_summary(self, search_request, loads) -> dict:
-        """
-        Create a summary of search results for better agent responses.
-        
-        Args:
-            search_request: Original search criteria
-            loads: Found loads
-            
-        Returns:
-            Summary dictionary with helpful information for the agent
-        """
-        if not loads:
-            # Provide helpful suggestions when no loads found
-            suggestions = []
-            if search_request.equipment_type:
-                suggestions.append(f"Try different equipment types (we also have Refrigerated, Flatbed loads)")
-            if search_request.origin_state and search_request.destination_state:
-                suggestions.append("Consider nearby states for pickup or delivery")
-            elif search_request.origin_state:
-                suggestions.append("Try expanding your delivery destination options")
-            elif search_request.destination_state:
-                suggestions.append("Try expanding your pickup location options")
-            else:
-                suggestions.append("Check back later - we get new loads frequently")
-            
-            return {
-                "message": "No loads found matching your exact criteria",
-                "suggestions": suggestions,
-                "alternative_search": "Would you like me to search with broader criteria?"
-            }
-        
-        # Group by route for better presentation
-        routes = {}
-        equipment_types = set()
-        for load in loads:
-            route_key = f"{load['origin_city']}, {load['origin_state']} → {load['destination_city']}, {load['destination_state']}"
-            if route_key not in routes:
-                routes[route_key] = []
-            routes[route_key].append(load)
-            equipment_types.add(load['equipment_type'])
-        
-        # Calculate rate statistics
-        rates = [load['total_rate'] for load in loads]
-        rate_stats = {
-            "min": min(rates),
-            "max": max(rates),
-            "avg": round(sum(rates) / len(rates), 2)
-        }
-        
-        return {
-            "message": f"Found {len(loads)} matching load{'s' if len(loads) > 1 else ''}",
-            "available_routes": list(routes.keys()),
-            "equipment_types": list(equipment_types),
-            "rate_range": rate_stats,
-            "best_load": loads[0] if loads else None,  # Highest ranked load
-            "pickup_dates": [load['pickup_date'][:10] for load in loads[:3]]  # Next 3 pickup dates
-        }
-    
-    def _rank_and_limit_loads(self, query, limit: int) -> List[dict]:
-        """
-        Rank loads by profitability and other factors, then apply limit.
-        
-        Ranking criteria:
-        1. Higher rate per mile (profitability) - 60% weight
-        2. Shorter distance (efficiency) - 25% weight  
-        3. Recent pickup date (urgency) - 15% weight
-        
-        Args:
-            query: SQLAlchemy query object
-            limit: Maximum number of results to return
-            
-        Returns:
-            List of ranked load dictionaries
-        """
-        # Order by rate per mile (desc), then by miles (asc), then by pickup date (asc)
-        ordered_query = query.order_by(
-            Load.rate_per_mile.desc(),
-            Load.miles.asc(),
-            Load.pickup_date.asc()
-        )
-        
-        # Apply limit
-        loads = ordered_query.limit(limit).all()
-        
-        # Convert to dictionaries with ranking info and score
+        # Apply limit and convert to dictionaries
+        limited_loads = scored_loads[:search_request.limit]
         ranked_loads = []
-        for i, load in enumerate(loads, 1):
+        
+        for i, (load, location_score) in enumerate(limited_loads, 1):
+            profitability_score = self._calculate_profitability_score(load)
             load_dict = {
                 "id": load.id,
                 "load_id": load.load_id,
@@ -222,17 +79,103 @@ class LoadSearchService:
                 "broker_name": load.broker_name,
                 "broker_mc": load.broker_mc,
                 "rank": i,
-                "profitability_score": self._calculate_profitability_score(load),
-                # Additional fields for agent presentation
+                "location_match_score": location_score,
+                "profitability_score": profitability_score,
+                # Additional formatted fields for presentation
                 "route_summary": f"{load.origin_city}, {load.origin_state} → {load.destination_city}, {load.destination_state}",
                 "pickup_date_formatted": load.pickup_date.strftime("%B %d, %Y"),
                 "delivery_date_formatted": load.delivery_date.strftime("%B %d, %Y"),
                 "weight_formatted": f"{load.weight:,.0f} lbs",
-                "rate_formatted": f"${load.total_rate:,.2f}"
+                "rate_formatted": f"${load.total_rate:,.2f}",
+                "match_quality": self._get_match_quality_description(location_score)
             }
             ranked_loads.append(load_dict)
         
-        return ranked_loads
+        return {
+            "loads": ranked_loads,
+            "total": len(scored_loads),
+            "search_summary": self._create_enhanced_search_summary(search_request, ranked_loads),
+            "filters_applied": {
+                "origin_city": search_request.origin_city,
+                "origin_state": search_request.origin_state,
+                "destination_city": search_request.destination_city,
+                "destination_state": search_request.destination_state,
+                "equipment_type": search_request.equipment_type,
+                "min_rate": search_request.min_rate,
+                "max_rate": search_request.max_rate,
+                "limit": search_request.limit
+            }
+        }
+    
+    def _calculate_location_score(self, load: Load, search_request: LoadSearchRequest) -> float:
+        """
+        Calculate location matching score based on city and state preferences.
+        
+        Scoring System:
+        - Exact city + state match: 100 points
+        - City match (different state): 60 points  
+        - State match (different city): 40 points
+        - Only city specified + match: 80 points
+        - Only state specified + match: 70 points
+        - No location preference: 50 points (neutral)
+        - Equipment match only: 20 points minimum
+        
+        Args:
+            load: Load model instance
+            search_request: Search criteria
+            
+        Returns:
+            Location match score (0-100)
+        """
+        # Origin scoring
+        origin_score = self._calculate_single_location_score(
+            load.origin_city, load.origin_state,
+            search_request.origin_city, search_request.origin_state
+        )
+        
+        # Destination scoring
+        dest_score = self._calculate_single_location_score(
+            load.destination_city, load.destination_state,
+            search_request.destination_city, search_request.destination_state
+        )
+        
+        # Combined score (average of origin and destination)
+        total_score = (origin_score + dest_score) / 2
+        
+        # Minimum score threshold - only return loads with some relevance
+        return total_score if total_score >= 20 else 0
+    
+    def _calculate_single_location_score(self, load_city: str, load_state: str, 
+                                       requested_city: Optional[str], requested_state: Optional[str]) -> float:
+        """Calculate score for a single location (origin OR destination)."""
+        if requested_city and requested_state:
+            # Both city and state specified
+            city_match = load_city.lower() == requested_city.lower() if requested_city else False
+            state_match = load_state.upper() == requested_state.upper() if requested_state else False
+            
+            if city_match and state_match:
+                return 100  # Perfect match
+            elif city_match:
+                return 60   # City match, wrong state
+            elif state_match:
+                return 40   # State match, wrong city
+            else:
+                return 0    # No match
+        elif requested_city:
+            # Only city specified
+            if load_city.lower() == requested_city.lower():
+                return 80
+            else:
+                return 0
+        elif requested_state:
+            # Only state specified
+            if load_state.upper() == requested_state.upper():
+                return 70
+            else:
+                return 0
+        else:
+            # No location preference specified
+            return 50
     
     def _calculate_profitability_score(self, load: Load) -> float:
         """
@@ -268,3 +211,157 @@ class LoadSearchService:
         
         total_score = base_score + distance_bonus + rate_bonus + weight_bonus
         return round(total_score, 2)
+    
+    def _get_match_quality_description(self, score: float) -> str:
+        """Get human-readable match quality description."""
+        if score >= 90:
+            return "Exact match"
+        elif score >= 70:
+            return "Great match"
+        elif score >= 50:
+            return "Good match"
+        elif score >= 30:
+            return "Partial match"
+        else:
+            return "Equipment match"
+    
+    def _create_enhanced_search_summary(self, search_request: LoadSearchRequest, loads: List[dict]) -> dict:
+        """
+        Create enhanced search summary with location matching insights.
+        
+        Args:
+            search_request: Original search criteria
+            loads: Found and ranked loads
+            
+        Returns:
+            Summary dictionary with helpful information for the agent
+        """
+        if not loads:
+            return {
+                "message": f"No {search_request.equipment_type or 'available'} loads found matching your preferences",
+                "suggestions": self._get_location_suggestions(search_request),
+                "alternative_search": "Would you like me to search with broader criteria?",
+                "search_criteria": self._format_search_criteria(search_request)
+            }
+        
+        best_load = loads[0]
+        match_quality = best_load["match_quality"]
+        
+        # Analyze match types
+        exact_matches = len([l for l in loads if l["location_match_score"] >= 90])
+        great_matches = len([l for l in loads if 70 <= l["location_match_score"] < 90])
+        good_matches = len([l for l in loads if 50 <= l["location_match_score"] < 70])
+        
+        # Calculate rate statistics
+        rates = [load['total_rate'] for load in loads]
+        rate_stats = {
+            "min": min(rates),
+            "max": max(rates),
+            "avg": round(sum(rates) / len(rates), 2)
+        }
+        
+        return {
+            "message": f"Found {len(loads)} matching {search_request.equipment_type or 'available'} load{'s' if len(loads) > 1 else ''}",
+            "best_match_quality": match_quality,
+            "match_breakdown": {
+                "exact_matches": exact_matches,
+                "great_matches": great_matches,
+                "good_matches": good_matches,
+                "total_matches": len(loads)
+            },
+            "best_load": {
+                "route": best_load['route_summary'],
+                "rate": best_load['rate_formatted'],
+                "pickup": best_load['pickup_date_formatted'],
+                "match_quality": match_quality
+            },
+            "rate_range": rate_stats,
+            "search_criteria": self._format_search_criteria(search_request),
+            "pickup_dates": [load['pickup_date_formatted'] for load in loads[:3]]
+        }
+    
+    def _get_location_suggestions(self, search_request: LoadSearchRequest) -> List[str]:
+        """Provide helpful suggestions when no loads are found."""
+        suggestions = []
+        
+        if search_request.origin_city and search_request.destination_city:
+            suggestions.append(f"Try nearby cities to {search_request.origin_city} or {search_request.destination_city}")
+        elif search_request.origin_state and search_request.destination_state:
+            suggestions.append(f"Consider loads from other cities in {search_request.origin_state} to {search_request.destination_state}")
+        
+        if search_request.equipment_type:
+            # Suggest alternative equipment types
+            equipment_alternatives = {
+                "Dry Van": ["Refrigerated", "Flatbed"],
+                "Refrigerated": ["Dry Van"], 
+                "Flatbed": ["Dry Van", "Step Deck"]
+            }
+            alternatives = equipment_alternatives.get(search_request.equipment_type, ["Dry Van", "Refrigerated"])
+            suggestions.append(f"Consider {' or '.join(alternatives)} loads")
+        
+        suggestions.extend([
+            "Check different pickup/delivery dates",
+            "Expand your delivery radius",
+            "Consider partial loads or team drivers"
+        ])
+        
+        return suggestions
+    
+    def _format_search_criteria(self, search_request: LoadSearchRequest) -> str:
+        """Format search criteria for human-readable display."""
+        criteria_parts = []
+        
+        if search_request.equipment_type:
+            criteria_parts.append(f"{search_request.equipment_type} equipment")
+        
+        # Origin formatting
+        if search_request.origin_city and search_request.origin_state:
+            criteria_parts.append(f"from {search_request.origin_city}, {search_request.origin_state}")
+        elif search_request.origin_city:
+            criteria_parts.append(f"from {search_request.origin_city}")
+        elif search_request.origin_state:
+            criteria_parts.append(f"from {search_request.origin_state}")
+        
+        # Destination formatting
+        if search_request.destination_city and search_request.destination_state:
+            criteria_parts.append(f"to {search_request.destination_city}, {search_request.destination_state}")
+        elif search_request.destination_city:
+            criteria_parts.append(f"to {search_request.destination_city}")
+        elif search_request.destination_state:
+            criteria_parts.append(f"to {search_request.destination_state}")
+        
+        # Rate criteria
+        if search_request.min_rate and search_request.max_rate:
+            criteria_parts.append(f"${search_request.min_rate:.2f}-${search_request.max_rate:.2f}/mile")
+        elif search_request.min_rate:
+            criteria_parts.append(f"min ${search_request.min_rate:.2f}/mile")
+        elif search_request.max_rate:
+            criteria_parts.append(f"max ${search_request.max_rate:.2f}/mile")
+        
+        return " ".join(criteria_parts) if criteria_parts else "any available loads"
+    
+    def get_nearby_loads(self, search_request: LoadSearchRequest, radius_miles: int = 100) -> dict:
+        """
+        Find loads within a certain radius of the requested locations.
+        This is a simplified version - in production you'd use geographical distance calculations.
+        
+        Args:
+            search_request: Original search criteria
+            radius_miles: Search radius in miles
+            
+        Returns:
+            Dictionary with nearby loads
+        """
+        # For this implementation, we'll expand the search to nearby states
+        # In production, you'd use proper geographical calculations
+        
+        expanded_request = LoadSearchRequest(
+            origin_state=search_request.origin_state,
+            destination_state=search_request.destination_state,
+            equipment_type=search_request.equipment_type,
+            min_rate=search_request.min_rate,
+            max_rate=search_request.max_rate,
+            limit=search_request.limit * 2  # Get more results for nearby search
+        )
+        
+        return self.search_loads(expanded_request)

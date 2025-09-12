@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inbound Carrier Sales Agent Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        
+        .dashboard-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+        
+        .dashboard-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .dashboard-header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .controls {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .controls label {
+            font-weight: 600;
+            margin-right: 1rem;
+        }
+        
+        .controls select, .controls button {
+            padding: 0.5rem 1rem;
+            border: 2px solid #e2e8f0;
+            border-radius: 5px;
+            margin-right: 1rem;
+            font-size: 1rem;
+        }
+        
+        .controls button {
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+            border: none;
+            transition: background 0.3s;
+        }
+        
+        .controls button:hover {
+            background: #5a6fd8;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .metric-card h3 {
+            color: #4a5568;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        
+        .metric-trend {
+            font-size: 0.9rem;
+            color: #718096;
+        }
+        
+        .success-rate { color: #48bb78; }
+        .revenue { color: #ed8936; }
+        .calls { color: #4299e1; }
+        .duration { color: #9f7aea; }
+        
+        .charts-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .chart-container {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .chart-container h3 {
+            margin-bottom: 1rem;
+            color: #4a5568;
+        }
+        
+        .details-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        
+        .details-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .details-card h3 {
+            color: #4a5568;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 0.5rem;
+        }
+        
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .table th, .table td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .table th {
+            background-color: #f7fafc;
+            font-weight: 600;
+            color: #4a5568;
+        }
+        
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-accepted {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        
+        .status-rejected {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+        
+        .status-no-agreement {
+            background: #feebc8;
+            color: #7b341e;
+        }
+        
+        .status-failed {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #718096;
+        }
+        
+        .error {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
+        }
+        
+        @media (max-width: 768px) {
+            .charts-section, .details-section {
+                grid-template-columns: 1fr;
+            }
+            
+            .dashboard-header h1 {
+                font-size: 2rem;
+            }
+            
+            .container {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-header">
+        <h1>Inbound Carrier Sales Dashboard</h1>
+        <p>Real-time KPIs and Performance Analytics</p>
+    </div>
+
+    <div class="container">
+        <!-- Controls -->
+        <div class="controls">
+            <label for="timeRange">Time Range:</label>
+            <select id="timeRange">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+            <button onclick="refreshDashboard()">Refresh Data</button>
+            <span id="lastUpdated" style="margin-left: 2rem; color: #718096;"></span>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading" class="loading">
+            <h3>Loading dashboard data...</h3>
+        </div>
+
+        <!-- Error State -->
+        <div id="error" class="error" style="display: none;"></div>
+
+        <!-- Metrics Overview -->
+        <div id="metricsGrid" class="metrics-grid" style="display: none;">
+            <!-- Metrics will be populated by JavaScript -->
+        </div>
+
+        <!-- Charts Section -->
+        <div id="chartsSection" class="charts-section" style="display: none;">
+            <div class="chart-container">
+                <h3>Daily Call Volume</h3>
+                <canvas id="callVolumeChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Success Rate Trend</h3>
+                <canvas id="successRateChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Details Section -->
+        <div id="detailsSection" class="details-section" style="display: none;">
+            <div class="details-card">
+                <h3>Recent Calls</h3>
+                <div id="recentCallsTable"></div>
+            </div>
+            <div class="details-card">
+                <h3>Top Performing Carriers</h3>
+                <div id="topCarriersTable"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = window.location.origin;
+        const API_KEY = '${API_KEY}'; // This should match your backend API key
+        
+        let callVolumeChart = null;
+        let successRateChart = null;
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDashboard();
+        });
+        
+        // Time range change handler
+        document.getElementById('timeRange').addEventListener('change', function() {
+            refreshDashboard();
+        });
+        
+        async function refreshDashboard() {
+            const days = document.getElementById('timeRange').value;
+            
+            try {
+                showLoading();
+                
+                // Fetch dashboard data
+                const response = await fetch(`${API_BASE}/api/metrics/dashboard?days=${days}`, {
+                    headers: {
+                        'X-API-Key': API_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (!data.ok) {
+                    throw new Error(data.error || 'Failed to fetch data');
+                }
+                
+                // Update dashboard with data
+                updateOverviewMetrics(data.data.overview);
+                updateCharts(data.data.trends);
+                await updateRecentCalls();
+                updateCarrierPerformance(data.data.carrier_insights);
+                
+                hideLoading();
+                showDashboard();
+                updateLastRefreshed();
+                
+            } catch (error) {
+                console.error('Dashboard error:', error);
+                showError('Failed to load dashboard data: ' + error.message);
+                hideLoading();
+            }
+        }
+        
+        function updateOverviewMetrics(overview) {
+            const metricsHtml = `
+                <div class="metric-card">
+                    <h3>Total Calls</h3>
+                    <div class="metric-value calls">${overview.total_calls}</div>
+                    <div class="metric-trend">Last ${document.getElementById('timeRange').value} days</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Success Rate</h3>
+                    <div class="metric-value success-rate">${overview.success_rate}%</div>
+                    <div class="metric-trend">${overview.successful_calls} successful calls</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Total Revenue</h3>
+                    <div class="metric-value revenue">${overview.total_revenue.toLocaleString()}</div>
+                    <div class="metric-trend">From accepted loads</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Avg Call Duration</h3>
+                    <div class="metric-value duration">${overview.avg_call_duration_minutes}m</div>
+                    <div class="metric-trend">Minutes per call</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Completion Rate</h3>
+                    <div class="metric-value calls">${overview.completion_rate}%</div>
+                    <div class="metric-trend">Calls with outcome</div>
+                </div>
+            `;
+            document.getElementById('metricsGrid').innerHTML = metricsHtml;
+        }
+        
+        function updateCharts(trends) {
+            const dailyTrends = trends.daily_trends;
+            
+            // Update call volume chart
+            if (callVolumeChart) {
+                callVolumeChart.destroy();
+            }
+            
+            const ctx1 = document.getElementById('callVolumeChart').getContext('2d');
+            callVolumeChart = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: dailyTrends.dates.map(date => new Date(date).toLocaleDateString()),
+                    datasets: [{
+                        label: 'Total Calls',
+                        data: dailyTrends.calls,
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Successful Calls',
+                        data: dailyTrends.successes,
+                        backgroundColor: 'rgba(72, 187, 120, 0.6)',
+                        borderColor: 'rgba(72, 187, 120, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            // Update success rate chart
+            if (successRateChart) {
+                successRateChart.destroy();
+            }
+            
+            const successRates = dailyTrends.dates.map((date, index) => {
+                const total = dailyTrends.calls[index];
+                const successful = dailyTrends.successes[index];
+                return total > 0 ? (successful / total * 100) : 0;
+            });
+            
+            const ctx2 = document.getElementById('successRateChart').getContext('2d');
+            successRateChart = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: dailyTrends.dates.map(date => new Date(date).toLocaleDateString()),
+                    datasets: [{
+                        label: 'Success Rate (%)',
+                        data: successRates,
+                        borderColor: 'rgba(237, 137, 54, 1)',
+                        backgroundColor: 'rgba(237, 137, 54, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+        
+        async function updateRecentCalls() {
+            try {
+                const response = await fetch(`${API_BASE}/api/metrics/calls?limit=10`, {
+                    headers: {
+                        'X-API-Key': API_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.ok && data.data.calls) {
+                    const callsHtml = `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Call ID</th>
+                                    <th>Carrier</th>
+                                    <th>Outcome</th>
+                                    <th>Rate</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.data.calls.map(call => `
+                                    <tr>
+                                        <td>${call.call_id}</td>
+                                        <td>${call.carrier_name || call.carrier_mc || 'Unknown'}</td>
+                                        <td><span class="status-badge status-${call.outcome}">${call.outcome || 'unknown'}</span></td>
+                                        <td>${call.final_rate ? '$' + call.final_rate.toLocaleString() : '-'}</td>
+                                        <td>${new Date(call.created_at).toLocaleDateString()}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    document.getElementById('recentCallsTable').innerHTML = callsHtml;
+                }
+            } catch (error) {
+                console.error('Failed to fetch recent calls:', error);
+                document.getElementById('recentCallsTable').innerHTML = '<p>Failed to load recent calls data.</p>';
+            }
+        }
+        
+        function updateCarrierPerformance(carrierInsights) {
+            if (carrierInsights.top_performers && carrierInsights.top_performers.length > 0) {
+                const carriersHtml = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Carrier</th>
+                                <th>Calls</th>
+                                <th>Success Rate</th>
+                                <th>Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${carrierInsights.top_performers.map(carrier => `
+                                <tr>
+                                    <td>${carrier.name}</td>
+                                    <td>${carrier.calls}</td>
+                                    <td>${carrier.success_rate}%</td>
+                                    <td>${carrier.revenue.toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 1rem; padding: 1rem; background: #f7fafc; border-radius: 5px;">
+                        <strong>Summary:</strong> ${carrierInsights.unique_carriers} total carriers, 
+                        ${carrierInsights.repeat_carriers} repeat customers
+                    </div>
+                `;
+                document.getElementById('topCarriersTable').innerHTML = carriersHtml;
+            } else {
+                document.getElementById('topCarriersTable').innerHTML = '<p>No carrier performance data available yet.</p>';
+            }
+        }
+        
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('metricsGrid').style.display = 'none';
+            document.getElementById('chartsSection').style.display = 'none';
+            document.getElementById('detailsSection').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function showDashboard() {
+            document.getElementById('metricsGrid').style.display = 'grid';
+            document.getElementById('chartsSection').style.display = 'grid';
+            document.getElementById('detailsSection').style.display = 'grid';
+        }
+        
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+        
+        function updateLastRefreshed() {
+            const now = new Date().toLocaleTimeString();
+            document.getElementById('lastUpdated').textContent = `Last updated: ${now}`;
+        }
+    </script>
+</body>
+</html>
