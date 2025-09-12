@@ -66,9 +66,9 @@ class CallPersistenceService:
         call.initial_rate = call_data.get("initial_rate")
         call.current_rate = call_data.get("current_rate")
         call.listed_rate = call_data.get("listed_rate")
-        call.final_rate = call_data.get("final_rate")
+        call.final_rate = self._safe_float(call_data.get("final_rate"))
         call.last_offer = call_data.get("last_offer")
-        call.negotiation_rounds = call_data.get("negotiation_rounds", 0)
+        call.negotiation_rounds = self._safe_int(call_data.get("negotiation_rounds"))
         call.outcome = call_data.get("outcome", "no_agreement")
         call.sentiment = call_data.get("sentiment")
         call.extracted_json = self._serialize_json(call_data.get("extracted_json"))
@@ -183,3 +183,21 @@ class CallPersistenceService:
         """
         calls = self.db.query(Call).filter(Call.carrier_mc == carrier_mc).all()
         return [self.get_call(call.call_id) for call in calls if call]
+
+    def _safe_float(self, value) -> Optional[float]:
+        """Convert value to float, handling empty strings and None."""
+        if value is None or value == "" or value == "null":
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_int(self, value) -> Optional[int]:
+        """Convert value to int, handling empty strings and None."""
+        if value is None or value == "" or value == "null":
+            return 0
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return 0

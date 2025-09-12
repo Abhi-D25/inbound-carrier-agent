@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from api.deps import require_api_key, get_db
 from api.services.conversation_manager import ConversationManager
 from api.services.call_persistence import CallPersistenceService
+import time
 
 router = APIRouter()
 
@@ -162,52 +163,70 @@ async def negotiate(
 
 @router.post("/happyrobot/end-call")
 async def end_call(
-    request: EndCallRequest,
+    request: Dict[str, Any],
     api_key: str = Depends(require_api_key),
     db: Session = Depends(get_db)
 ):
     """
     Complete the call and persist all conversation data.
-    Returns comprehensive call summary for HappyRobot.
+    Handles data from Extract and Classify nodes.
     """
     try:
-        conversation_manager = ConversationManager(db)
-        persistence_service = CallPersistenceService(db)
+        # Extract data from request
+        call_id = request.get("call_id", f"call_{int(time.time())}")
         
-        # Get conversation summary
-        summary = conversation_manager.get_conversation_summary(request.call_id)
+        # Parse extracted data (from Extract node)
+        extracted_data = request.get("extracted_data", {})
         
-        # Persist to database
+        # Parse classification data (from Classify node)
+        classification = request.get("classification", {})
+        
+        # Build call data for persistence
         call_data = {
-            "call_id": request.call_id,
-            "mc": summary.get("mc_number"),
-            "carrier_name": summary.get("carrier_name"),
-            "fmcsa_status": summary.get("fmcsa_status"),
-            "load_id": summary.get("presented_load", {}).get("load_id"),
-            "listed_rate": summary.get("presented_load", {}).get("total_rate"),
-            "final_rate": summary.get("final_rate"),
-            "last_offer": summary.get("last_offer"),
-            "negotiation_rounds": summary.get("negotiation_rounds"),
-            "outcome": summary.get("outcome"),
-            "sentiment": request.sentiment or summary.get("sentiment"),
-            "extracted_json": summary.get("extracted_data"),
-            "notes": request.reason
+            "call_id": call_id,
+            "mc": extracted_data.get("mc_number"),
+            "carrier_name": extracted_data.get("carrier_name"),
+            "equipment_type": extracted_data.get("equipment_type"),
+            "load_id": None,  # No load was presented in this case
+            "listed_rate": None,
+            "final_rate": extracted_data.get("final_rate"),
+            "negotiation_rounds": extracted_data.get("negotiation_rounds", 0),
+            "outcome": extracted_data.get("call_outcome", "failed"),
+            "sentiment": classification.get("classification", "neutral"),  # Get from classify node
+            "extracted_json": {
+                "origin_preference": extracted_data.get("origin_preference"),
+                "destination_preference": extracted_data.get("destination_preference"),
+                "equipment_type": extracted_data.get("equipment_type"),
+                "load_presented": extracted_data.get("load_presented"),
+                "full_conversation_data": extracted_data
+            },
+            "notes": f"Call completed via HappyRobot. Outcome: {extracted_data.get('call_outcome', 'unknown')}"
         }
         
+        # Persist to database
+        persistence_service = CallPersistenceService(db)
         persistence_result = persistence_service.save_call(call_data)
         
         return {
             "ok": True,
             "data": {
-                "call_summary": summary,
+                "call_summary": {
+                    "call_id": call_id,
+                    "outcome": call_data["outcome"],
+                    "sentiment": call_data["sentiment"],
+                    "carrier": call_data["carrier_name"],
+                    "equipment": call_data["equipment_type"]
+                },
                 "persistence_result": persistence_result,
-                "classification": {
-                    "outcome": summary.get("outcome"),
-                    "sentiment": summary.get("sentiment"),
-                    "success": summary.get("outcome") == "accepted"
+                "metrics_captured": {
+                    "mc_verified": bool(call_data["mc"]),
+                    "equipment_collected": bool(call_data["equipment_type"]),
+                    "outcome_classified": bool(call_data["outcome"]),
+                    "sentiment_analyzed": bool(call_data["sentiment"])
                 }
             }
         }
+        
     except Exception as e:
         return {
             "ok": False,
