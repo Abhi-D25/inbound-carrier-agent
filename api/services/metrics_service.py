@@ -66,12 +66,16 @@ class MetricsService:
         
         calls_data = []
         for call in recent_calls:
-            # Parse extracted JSON to get equipment type
+            # Parse extracted JSON to get equipment type and route information
             equipment_type = None
+            origin_preference = None
+            destination_preference = None
             if call.extracted_json:
                 try:
                     data = json.loads(call.extracted_json) if isinstance(call.extracted_json, str) else call.extracted_json
                     equipment_type = data.get("equipment_type")
+                    origin_preference = data.get("origin_preference")
+                    destination_preference = data.get("destination_preference")
                 except:
                     pass
             
@@ -85,6 +89,8 @@ class MetricsService:
                 "final_rate": call.final_rate,
                 "negotiation_rounds": call.negotiation_rounds or 0,
                 "equipment_type": equipment_type,
+                "origin_preference": origin_preference,
+                "destination_preference": destination_preference,
                 "call_duration_seconds": call.call_duration_seconds,
                 "created_at": call.created_at.isoformat() if call.created_at else None,
                 "fmcsa_status": call.fmcsa_status
@@ -139,6 +145,7 @@ class MetricsService:
         return {
             "total_calls": total_calls,
             "successful_calls": successful_calls,
+            "verified_calls": verified_calls,
             "load_booking_rate": round(load_booking_rate, 1),
             "completion_rate": round(completion_rate, 1),
             "total_revenue": round(total_revenue, 2),

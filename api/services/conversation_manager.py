@@ -107,6 +107,9 @@ class ConversationManager:
         conversation["data"]["mc_number"] = mc_number
         conversation["data"]["fmcsa_verification"] = verification
         
+        # Save MC verification status to database
+        self._save_mc_verification_to_db(call_id, mc_number, verification)
+        
         if verification["eligible"]:
             conversation["state"] = ConversationState.LOAD_SEARCH
             conversation["data"]["carrier_name"] = verification["carrier_name"]
@@ -387,6 +390,38 @@ class ConversationManager:
         else:
             return "conservative"
     
+    def _save_mc_verification_to_db(self, call_id: str, mc_number: str, verification: Dict[str, Any]) -> None:
+        """Save MC verification status to the Call database record."""
+        try:
+            from api.models import Call
+            
+            # Check if call record exists
+            call = self.db.query(Call).filter(Call.call_id == call_id).first()
+            
+            if call:
+                # Update existing call record
+                call.carrier_mc = mc_number
+                call.carrier_name = verification.get("carrier_name")
+                call.fmcsa_status = "verified" if verification.get("eligible") else "failed"
+            else:
+                # Create new call record
+                call = Call(
+                    call_id=call_id,
+                    carrier_mc=mc_number,
+                    carrier_name=verification.get("carrier_name"),
+                    fmcsa_status="verified" if verification.get("eligible") else "failed",
+                    outcome="incomplete"  # Default outcome until call is completed
+                )
+                self.db.add(call)
+            
+            # Commit the changes
+            self.db.commit()
+            
+        except Exception as e:
+            # Log error but don't fail the verification process
+            print(f"Warning: Failed to save MC verification to database: {str(e)}")
+            self.db.rollback()
+
     def _get_timestamp(self) -> str:
         """Get current timestamp."""
         from datetime import datetime

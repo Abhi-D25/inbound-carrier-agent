@@ -3,8 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Freight Brokerage Analytics</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.min.js"></script>
+    <title>Inbound Carrier Analytics | Real-Time Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script>
+        // Fallback Chart.js loading
+        if (typeof Chart === 'undefined') {
+            console.log('Loading Chart.js fallback...');
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.min.js';
+            script.onload = function() {
+                console.log('Chart.js loaded from fallback CDN');
+                // Reinitialize charts if they failed to load
+                if (typeof initializeCharts === 'function') {
+                    initializeCharts();
+                }
+            };
+            script.onerror = function() {
+                console.error('Failed to load Chart.js from both CDNs');
+            };
+            document.head.appendChild(script);
+        }
+    </script>
     <style>
         * {
             margin: 0;
@@ -13,168 +32,186 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background-color: #f5f7fa;
-            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+            color: #2c3e50;
             line-height: 1.6;
+            min-height: 100vh;
         }
         
+        /* Header */
         .dashboard-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             color: white;
-            padding: 2rem;
-            text-align: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 1.5rem 2rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         
-        .dashboard-header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            font-weight: 700;
+        .header-content {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         
-        .dashboard-header p {
-            font-size: 1.1rem;
+        .header-left h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 0.2rem;
+        }
+        
+        .header-left p {
+            font-size: 0.9rem;
             opacity: 0.9;
         }
         
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        
-        .controls {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .controls-left {
+        .header-right {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
         
-        .controls label {
-            font-weight: 600;
-            color: #4a5568;
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
         }
         
-        .controls select, .controls button {
-            padding: 0.75rem 1rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: all 0.2s;
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
         }
         
-        .controls button {
-            background: #667eea;
-            color: white;
-            cursor: pointer;
-            border: none;
-            font-weight: 600;
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
         }
         
-        .controls button:hover {
-            background: #5a6fd8;
-            transform: translateY(-1px);
+        /* Container */
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 2rem;
         }
         
-        .metrics-grid {
+        /* KPI Cards Grid */
+        .kpi-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
         
-        .metric-card {
+        .kpi-card {
             background: white;
-            padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            text-align: center;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
         
-        .metric-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
         }
         
-        .metric-card h3 {
-            color: #4a5568;
-            font-size: 0.9rem;
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
         }
         
-        .metric-value {
-            font-size: 3rem;
-            font-weight: 800;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
+        .kpi-card.success::before { background: linear-gradient(90deg, #10b981, #34d399); }
+        .kpi-card.warning::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .kpi-card.danger::before { background: linear-gradient(90deg, #ef4444, #f87171); }
         
-        .metric-trend {
-            font-size: 1rem;
-            color: #718096;
+        .kpi-label {
+            font-size: 0.85rem;
+            color: #64748b;
             font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
         }
         
-        .charts-section {
+        .kpi-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
+        }
+        
+        .kpi-change {
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        
+        .kpi-change.positive { color: #10b981; }
+        .kpi-change.negative { color: #ef4444; }
+        
+        /* Charts Section */
+        .charts-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .charts-row-three {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1.5rem;
             margin-bottom: 2rem;
         }
         
         .chart-container {
             background: white;
-            padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            height: 400px;
+            position: relative;
         }
         
-        .chart-container h3 {
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 1.5rem;
-            color: #2d3748;
-            font-size: 1.2rem;
+        }
+        
+        .chart-title {
+            font-size: 1.1rem;
             font-weight: 600;
+            color: #1e293b;
         }
         
-        .details-section {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 2rem;
-            margin-bottom: 2rem;
-        }
-        
-        .details-card {
+        /* Tables */
+        .table-container {
             background: white;
-            padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .details-card h3 {
-            color: #2d3748;
-            margin-bottom: 1.5rem;
-            font-size: 1.2rem;
-            font-weight: 600;
-            border-bottom: 3px solid #667eea;
-            padding-bottom: 0.5rem;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 2rem;
         }
         
         .table {
@@ -182,91 +219,68 @@
             border-collapse: collapse;
         }
         
-        .table th, .table td {
-            text-align: left;
-            padding: 1rem 0.75rem;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
         .table th {
-            background-color: #f7fafc;
+            text-align: left;
+            padding: 0.75rem;
+            font-size: 0.85rem;
             font-weight: 600;
-            color: #4a5568;
-            font-size: 0.9rem;
+            color: #64748b;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #f1f5f9;
         }
         
         .table tr:hover {
-            background-color: #f7fafc;
+            background: #f8fafc;
         }
         
-        .status-badge {
-            padding: 0.4rem 0.8rem;
-            border-radius: 20px;
+        /* Status Badges */
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
             font-size: 0.75rem;
-            font-weight: 700;
+            font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            display: inline-block;
         }
         
-        .status-accepted {
-            background: #c6f6d5;
-            color: #22543d;
-        }
+        .badge.accepted { background: #d1fae5; color: #065f46; }
+        .badge.rejected { background: #f3f4f6; color: #6b7280; }
+        .badge.failed { background: #f3f4f6; color: #6b7280; }
+        .badge.no-agreement { background: #f3f4f6; color: #6b7280; }
+        .badge.incomplete { background: #f3f4f6; color: #6b7280; }
         
-        .status-rejected {
-            background: #fed7d7;
-            color: #742a2a;
-        }
-        
-        .status-no-agreement {
-            background: #feebc8;
-            color: #7b341e;
-        }
-        
-        .status-failed, .status-incomplete {
-            background: #e2e8f0;
-            color: #4a5568;
-        }
-        
-        .refresh-info {
-            text-align: center;
-            color: #718096;
-            font-size: 0.9rem;
-            margin-top: 2rem;
-            padding: 1rem;
-            background: white;
+        /* Real-time Updates */
+        .update-notification {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #1e293b;
+            color: white;
+            padding: 1rem 1.5rem;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: none;
+            animation: slideIn 0.3s ease;
         }
         
-        .no-data {
-            text-align: center;
-            color: #718096;
-            padding: 3rem;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
         }
         
-        .no-data h3 {
-            margin-bottom: 1rem;
-            color: #4a5568;
-        }
-        
-        .no-data p {
-            margin-bottom: 0.5rem;
-        }
-        
-        .no-data ul {
-            text-align: left;
-            max-width: 400px;
-            margin: 0 auto;
-        }
-        
+        /* Responsive */
         @media (max-width: 1024px) {
-            .charts-section, .details-section {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+            .charts-row-three {
                 grid-template-columns: 1fr;
             }
         }
@@ -276,302 +290,547 @@
                 padding: 1rem;
             }
             
-            .controls {
+            .kpi-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header-content {
                 flex-direction: column;
                 gap: 1rem;
-                align-items: stretch;
+                text-align: center;
             }
-            
-            .dashboard-header h1 {
-                font-size: 2rem;
-            }
-            
-            .metric-value {
-                font-size: 2.5rem;
-            }
+        }
+        
+        /* Loading State */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 200px;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="dashboard-header">
-        <h1>Freight Brokerage Analytics</h1>
-        <p>Inbound Carrier Sales Performance Dashboard</p>
+        <div class="header-content">
+            <div class="header-left">
+                <h1>📊 Inbound Carrier Analytics</h1>
+                <p>Real-Time Performance Monitoring</p>
+            </div>
+            <div class="header-right">
+                <div class="live-indicator">
+                    <span class="live-dot"></span>
+                    <span>Live</span>
+                </div>
+                <select id="timeRange" onchange="updateDashboard()">
+                    <option value="today">Today</option>
+                    <option value="7" selected>Last 7 Days</option>
+                    <option value="30">Last 30 Days</option>
+                    <option value="90">Last Quarter</option>
+                </select>
+            </div>
+        </div>
     </div>
 
     <div class="container">
-        <!-- Controls -->
-        <div class="controls">
-            <div class="controls-left">
-                <label for="timeRange">Analysis Period:</label>
-                <select id="timeRange">
-                    <option value="7" {{ 'selected' if days == 7 else '' }}>Last 7 days</option>
-                    <option value="30" {{ 'selected' if days == 30 else '' }}>Last 30 days</option>
-                    <option value="90" {{ 'selected' if days == 90 else '' }}>Last 90 days</option>
-                </select>
-                <button onclick="refreshDashboard()">Refresh Data</button>
+        <!-- Primary KPIs -->
+        <div class="kpi-grid" id="kpiGrid">
+            <div class="kpi-card success">
+                <div class="kpi-label">Call-to-Booking Rate</div>
+                <div class="kpi-value" id="bookingRate">--</div>
+                <div class="kpi-change positive">✓ <span id="successfulCallsCount">--</span></div>
             </div>
-            <div>
-                <span id="lastUpdated">Updated: {{ dashboard_data.period.end_date }}</span>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Calls</div>
+                <div class="kpi-value" id="totalCalls">--</div>
+                <div class="kpi-change" id="callsTrend">--</div>
             </div>
-        </div>
-
-        {% if dashboard_data.overview.total_calls > 0 %}
-        <!-- Key Metrics Overview -->
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <h3>Total Inbound Calls</h3>
-                <div class="metric-value">{{ dashboard_data.overview.total_calls }}</div>
-                <div class="metric-trend">Last {{ days }} days</div>
+            <div class="kpi-card">
+                <div class="kpi-label">Avg Negotiation Rounds</div>
+                <div class="kpi-value" id="avgNegotiationRounds">--</div>
+                <div class="kpi-change" id="negotiationTrend">--</div>
             </div>
-            <div class="metric-card">
-                <h3>Load Booking Rate</h3>
-                <div class="metric-value">{{ "%.1f"|format(dashboard_data.overview.load_booking_rate) }}%</div>
-                <div class="metric-trend">{{ dashboard_data.overview.successful_calls }} loads booked</div>
+            <div class="kpi-card">
+                <div class="kpi-label">MC Verification Rate</div>
+                <div class="kpi-value" id="verificationRate">--</div>
+                <div class="kpi-change positive">✓ <span id="verificationCount">--</span></div>
             </div>
-            <div class="metric-card">
-                <h3>Total Revenue</h3>
-                <div class="metric-value">${{ "{:,}".format(dashboard_data.overview.total_revenue|round|int) }}</div>
-                <div class="metric-trend">From booked loads</div>
-            </div>
-            <div class="metric-card">
-                <h3>Avg Call Duration</h3>
-                <div class="metric-value">{{ "%.1f"|format(dashboard_data.overview.avg_call_duration_minutes) }}m</div>
-                <div class="metric-trend">Minutes per call</div>
-            </div>
-            <div class="metric-card">
-                <h3>Carrier Verification</h3>
-                <div class="metric-value">{{ "%.1f"|format(dashboard_data.overview.verification_rate) }}%</div>
-                <div class="metric-trend">FMCSA verified</div>
-            </div>
-            <div class="metric-card">
-                <h3>Revenue per Call</h3>
-                <div class="metric-value">${{ "{:,}".format(dashboard_data.overview.revenue_per_call|round|int) }}</div>
-                <div class="metric-trend">Average efficiency</div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Revenue Collected</div>
+                <div class="kpi-value" id="revenueImpact">--</div>
+                <div class="kpi-change positive" id="revenueTrend">--</div>
             </div>
         </div>
 
-        <!-- Charts Section -->
-        <div class="charts-section">
+        <!-- Charts Row -->
+        <div class="charts-row-three">
             <div class="chart-container">
-                <h3>Daily Call Volume Trends</h3>
-                <canvas id="volumeChart"></canvas>
-            </div>
-            <div class="chart-container">
-                <h3>Revenue & Success Rate</h3>
-                <canvas id="revenueChart"></canvas>
-            </div>
-        </div>
-
-        <!-- Details Section -->
-        <div class="details-section">
-            <div class="details-card">
-                <h3>Recent Call Activity</h3>
-                {% if recent_calls|length > 0 %}
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Carrier</th>
-                            <th>Equipment</th>
-                            <th>Outcome</th>
-                            <th>Revenue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for call in recent_calls[:8] %}
-                        <tr>
-                            <td>
-                                <strong>{{ call.carrier_name or call.carrier_mc or 'Unknown' }}</strong>
-                                <br><small style="color: #718096;">{{ call.call_id }}</small>
-                            </td>
-                            <td>{{ call.equipment_type or '-' }}</td>
-                            <td><span class="status-badge status-{{ call.outcome or 'unknown' }}">{{ call.outcome or 'unknown' }}</span></td>
-                            <td>{{ "${:,}".format(call.final_rate|round|int) if call.final_rate else '-' }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <p style="text-align: center; color: #718096; padding: 2rem;">No call data available</p>
-                {% endif %}
-            </div>
-
-            <div class="details-card">
-                <h3>Top Carriers</h3>
-                {% if dashboard_data.carrier_insights.top_performers|length > 0 %}
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Carrier</th>
-                            <th>Success</th>
-                            <th>Revenue</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for carrier in dashboard_data.carrier_insights.top_performers[:5] %}
-                        <tr>
-                            <td>
-                                <strong>{{ carrier.name }}</strong>
-                                <br><small style="color: #718096;">{{ carrier.calls }} calls</small>
-                            </td>
-                            <td>{{ "%.1f"|format(carrier.success_rate) }}%</td>
-                            <td>${{ "{:,}".format(carrier.total_revenue|round|int) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <div style="margin-top: 1rem; padding: 1rem; background: #f7fafc; border-radius: 8px; font-size: 0.9rem;">
-                    <strong>Summary:</strong> {{ dashboard_data.carrier_insights.unique_carriers }} total carriers • {{ dashboard_data.carrier_insights.repeat_carriers }} repeat customers
+                <div class="chart-header">
+                    <h3 class="chart-title">Sentiment Distribution</h3>
                 </div>
-                {% else %}
-                <p style="text-align: center; color: #718096; padding: 2rem;">No carrier data available</p>
-                {% endif %}
+                <canvas id="sentimentChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">Outcome Distribution</h3>
+                </div>
+                <canvas id="outcomeChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-header">
+                    <h3 class="chart-title">Equipment Demand</h3>
+                </div>
+                <canvas id="equipmentChart"></canvas>
             </div>
         </div>
-        
-        {% else %}
-        <!-- No Data State -->
-        <div class="no-data">
-            <h3>🚛 No Call Data Available</h3>
-            <p>Your freight brokerage analytics will appear here once you start processing calls.</p>
-            <p><strong>To populate the dashboard:</strong></p>
-            <ul>
-                <li>Ensure your HappyRobot agent is receiving calls</li>
-                <li>Test with the sample data generator script</li>
-                <li>Check that the end-call webhook is working</li>
-                <li>Verify database connectivity</li>
-            </ul>
-        </div>
-        {% endif %}
 
-        <div class="refresh-info">
-            <p><strong>Dashboard Period:</strong> {{ dashboard_data.period.start_date }} to {{ dashboard_data.period.end_date }} ({{ days }} days)</p>
-            <p>This dashboard auto-refreshes with live data from your inbound carrier calls.</p>
+        <!-- Recent Calls Table -->
+        <div class="table-container">
+            <div class="chart-header">
+                <h3 class="chart-title">Recent Call Activity</h3>
+                <button onclick="exportData()" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">Export CSV</button>
+            </div>
+            <table class="table" id="recentCallsTable">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Carrier</th>
+                        <th>MC#</th>
+                        <th>Equipment</th>
+                        <th>Route</th>
+                        <th>Outcome</th>
+                        <th>Agreed Rate</th>
+                        <th>Sentiment</th>
+                    </tr>
+                </thead>
+                <tbody id="callsTableBody">
+                    <tr><td colspan="8" style="text-align: center; padding: 2rem;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Carrier Intelligence -->
+        <div class="table-container">
+            <div class="chart-header">
+                <h3 class="chart-title">Top Performing Carriers</h3>
+            </div>
+            <table class="table" id="carriersTable">
+                <thead>
+                    <tr>
+                        <th>Carrier</th>
+                        <th>Total Calls</th>
+                        <th>Success Rate</th>
+                        <th>Avg Negotiation</th>
+                        <th>Sentiment Score</th>
+                    </tr>
+                </thead>
+                <tbody id="carriersTableBody">
+                    <tr><td colspan="5" style="text-align: center; padding: 2rem;">Loading...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
+    <!-- Update Notification -->
+    <div class="update-notification" id="updateNotification">
+        New call data received!
+    </div>
+
     <script>
-        // Data from server (no API keys needed)
-        const dashboardData = JSON.parse('{{ dashboard_data_json | safe }}');
-        let volumeChart = null;
-        let revenueChart = null;
-
+        // Global variables
+        let dashboardData = {};
+        let charts = {};
+        let updateInterval;
+        let previousCallCount = 0;
+        
+        // Helper function to adjust time by subtracting 7 hours
+        function adjustTime(dateString) {
+            const date = new Date(dateString);
+            date.setHours(date.getHours() - 7);
+            return date.toLocaleString('en-US', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+        
+        // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
-            if (dashboardData.overview.total_calls > 0) {
-                initializeCharts();
-            }
+            initializeDashboard();
+            startAutoRefresh();
         });
-
-        function initializeCharts() {
-            const trends = dashboardData.trends.daily_trends;
+        
+        // Initialize and fetch data
+        async function initializeDashboard() {
+            await fetchDashboardData();
+            // Initialize the call count for tracking new calls
+            previousCallCount = dashboardData.dashboard?.overview?.total_calls || 0;
+            initializeCharts();
+            updateKPIs();
+            updateTables();
+        }
+        
+        // Fetch dashboard data
+        async function fetchDashboardData() {
+            try {
+                const timeRange = document.getElementById('timeRange').value;
+                const days = timeRange === 'today' ? 1 : parseInt(timeRange);
+                
+                // Show loading state
+                showLoadingState();
+                
+                // For the assessment, we'll use the internal endpoint
+                const response = await fetch(`/api/dashboard-data?days=${days}`);
+                const result = await response.json();
+                
+                if (result.ok) {
+                    dashboardData = result.data;
+                    console.log('Dashboard data loaded:', dashboardData);
+                    console.log('Dashboard structure:', {
+                        hasDashboard: !!dashboardData.dashboard,
+                        hasOverview: !!dashboardData.dashboard?.overview,
+                        hasPerformance: !!dashboardData.dashboard?.performance,
+                        hasEnhanced: !!dashboardData.enhanced_metrics,
+                        hasRecentCalls: !!dashboardData.recent_calls
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching dashboard data:', error);
+                // Show error state instead of mock data
+                dashboardData = {};
+                showErrorState(error.message);
+            }
+        }
+        
+        // Update KPIs
+        function updateKPIs() {
+            const metrics = dashboardData.dashboard || {};
+            const overview = metrics.overview || {};
+            const performance = metrics.performance || {};
+            const operational = metrics.operational || {};
+            const enhanced = dashboardData.enhanced_metrics || {};
             
-            if (!trends || !trends.dates || trends.dates.length === 0) {
+            // Update KPI values with fallbacks
+            document.getElementById('bookingRate').textContent = 
+                overview.load_booking_rate ? `${overview.load_booking_rate.toFixed(1)}%` : 
+                enhanced.first_call_resolution_rate ? `${enhanced.first_call_resolution_rate.toFixed(1)}%` : '0%';
+            
+            document.getElementById('totalCalls').textContent = 
+                overview.total_calls || '0';
+            
+            document.getElementById('avgNegotiationRounds').textContent = 
+                performance.avg_negotiation_rounds ? `${performance.avg_negotiation_rounds.toFixed(1)}` : '0';
+            
+            document.getElementById('verificationRate').textContent = 
+                overview.verification_rate ? `${overview.verification_rate.toFixed(1)}%` : '0%';
+            
+            
+            document.getElementById('revenueImpact').textContent = 
+                overview.total_revenue ? `$${overview.total_revenue.toFixed(0)}` : '$0';
+            
+            // Update secondary metrics
+            document.getElementById('verificationCount').textContent = 
+                `${overview.verified_calls || 0} verified`;
+            
+            document.getElementById('successfulCallsCount').textContent = 
+                `${overview.successful_calls || 0} successful`;
+        }
+        
+        // Initialize Charts
+        function initializeCharts() {
+            // Check if Chart.js is loaded
+            if (typeof Chart === 'undefined') {
+                console.error('Chart.js not loaded. Charts will not be displayed.');
                 return;
             }
-
-            // Volume Chart
-            const ctx1 = document.getElementById('volumeChart').getContext('2d');
-            volumeChart = new Chart(ctx1, {
-                type: 'line',
+            
+            const metrics = dashboardData.dashboard || {};
+            const trends = metrics.trends || {};
+            const performance = metrics.performance || {};
+            
+            try {
+                // Sentiment Distribution Chart
+                const sentimentCtx = document.getElementById('sentimentChart').getContext('2d');
+                const sentimentData = performance.sentiment_breakdown || {};
+                charts.sentiment = new Chart(sentimentCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(sentimentData),
+                        datasets: [{
+                            data: Object.values(sentimentData),
+                            backgroundColor: Object.keys(sentimentData).map(sentiment => {
+                                switch(sentiment) {
+                                    case 'positive': return '#10b981';
+                                    case 'neutral': return '#6b7280';
+                                    case 'negative': return '#ef4444';
+                                    default: return '#6b7280';
+                                }
+                            })
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        aspectRatio: 1.5,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        }
+                    }
+                });
+            
+            // Outcome Chart
+            const outcomeCtx = document.getElementById('outcomeChart').getContext('2d');
+            const outcomeData = performance.outcome_breakdown || {};
+            charts.outcome = new Chart(outcomeCtx, {
+                type: 'doughnut',
                 data: {
-                    labels: trends.dates.map(date => new Date(date).toLocaleDateString()),
+                    labels: Object.keys(outcomeData),
                     datasets: [{
-                        label: 'Total Calls',
-                        data: trends.calls,
-                        borderColor: '#667eea',
-                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                        borderWidth: 3,
-                        fill: true,
-                        tension: 0.4
-                    }, {
-                        label: 'Successful Calls',
-                        data: trends.successes,
-                        borderColor: '#48bb78',
-                        backgroundColor: 'rgba(72, 187, 120, 0.1)',
-                        borderWidth: 3,
-                        fill: true,
-                        tension: 0.4
+                        data: Object.values(outcomeData),
+                        backgroundColor: Object.keys(outcomeData).map(outcome => 
+                            outcome === 'accepted' ? '#10b981' : '#6b7280'
+                        )
                     }]
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    aspectRatio: 1.5,
                     plugins: {
-                        legend: {
-                            position: 'top',
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
+                        legend: { position: 'bottom' }
                     }
                 }
             });
-
-            // Revenue Chart
-            const ctx2 = document.getElementById('revenueChart').getContext('2d');
-            revenueChart = new Chart(ctx2, {
+            
+            // Equipment Chart
+            const equipmentCtx = document.getElementById('equipmentChart').getContext('2d');
+            const enhanced = dashboardData.enhanced_metrics || {};
+            const equipmentData = enhanced.equipment_match_rates || {};
+            
+            // Prepare equipment chart data
+            const equipmentLabels = Object.keys(equipmentData);
+            const equipmentTotals = Object.values(equipmentData).map(d => d.total || 0);
+            const equipmentSuccesses = Object.values(equipmentData).map(d => d.successful || 0);
+            
+            charts.equipment = new Chart(equipmentCtx, {
                 type: 'bar',
                 data: {
-                    labels: trends.dates.map(date => new Date(date).toLocaleDateString()),
+                    labels: equipmentLabels,
                     datasets: [{
-                        label: 'Daily Revenue ($)',
-                        data: trends.revenue,
-                        backgroundColor: 'rgba(237, 137, 54, 0.7)',
-                        borderColor: '#ed8936',
-                        borderWidth: 1,
-                        yAxisID: 'y'
+                        label: 'Total Requests',
+                        data: equipmentTotals,
+                        backgroundColor: '#e5e7eb'
                     }, {
-                        label: 'Success Rate (%)',
-                        data: trends.success_rates || [],
-                        type: 'line',
-                        borderColor: '#48bb78',
-                        backgroundColor: 'transparent',
-                        borderWidth: 3,
-                        tension: 0.4,
-                        yAxisID: 'y1'
+                        label: 'Successful',
+                        data: equipmentSuccesses,
+                        backgroundColor: '#3b82f6'
                     }]
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
+                    indexAxis: 'y',
                     plugins: {
-                        legend: {
-                            position: 'top',
-                        }
+                        legend: { position: 'bottom' }
                     },
                     scales: {
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            beginAtZero: true
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
+                        x: {
                             beginAtZero: true,
-                            max: 100,
-                            grid: {
-                                drawOnChartArea: false,
-                            },
+                            ticks: {
+                                stepSize: 1
+                            }
                         }
                     }
                 }
             });
+            } catch (error) {
+                console.error('Error initializing charts:', error);
+            }
         }
-
-        function refreshDashboard() {
-            const days = document.getElementById('timeRange').value;
-            window.location.href = `/dashboard?days=${days}`;
+        
+        // Update Tables
+        function updateTables() {
+            const recentCalls = dashboardData.recent_calls || [];
+            const metrics = dashboardData.dashboard || {};
+            const carriers = metrics.carrier_insights?.top_performers || [];
+            
+            // Update Recent Calls Table
+            const callsBody = document.getElementById('callsTableBody');
+            if (recentCalls.length > 0) {
+                callsBody.innerHTML = recentCalls.slice(0, 10).map(call => `
+                    <tr>
+                        <td>${adjustTime(call.created_at)}</td>
+                        <td>${call.carrier_name || 'Unknown'}</td>
+                        <td>${call.carrier_mc || '--'}</td>
+                        <td>${call.equipment_type || '--'}</td>
+                        <td>${call.origin_preference || '--'} → ${call.destination_preference || '--'}</td>
+                        <td><span class="badge ${call.outcome}">${call.outcome || 'pending'}</span></td>
+                        <td>${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'}</td>
+                        <td><span class="badge ${call.sentiment}">${call.sentiment || 'neutral'}</span></td>
+                    </tr>
+                `).join('');
+            } else {
+                callsBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">No recent calls</td></tr>';
+            }
+            
+            // Update Carriers Table
+            const carriersBody = document.getElementById('carriersTableBody');
+            if (carriers.length > 0) {
+                carriersBody.innerHTML = carriers.slice(0, 5).map(carrier => `
+                    <tr>
+                        <td><strong>${carrier.name}</strong><br><small>${carrier.mc}</small></td>
+                        <td>${carrier.calls}</td>
+                        <td>${carrier.success_rate.toFixed(1)}%</td>
+                        <td>${carrier.avg_negotiation_rounds || '--'}</td>
+                        <td>${carrier.sentiment_score || '--'}</td>
+                    </tr>
+                `).join('');
+            } else {
+                carriersBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">No carrier data available</td></tr>';
+            }
         }
-
-        // Set chart heights
-        const chartCanvases = document.querySelectorAll('canvas');
-        chartCanvases.forEach(canvas => {
-            canvas.style.height = '300px';
-        });
+        
+        // Auto-refresh functionality
+        function startAutoRefresh() {
+            // Refresh every 30 seconds
+            updateInterval = setInterval(async () => {
+                const oldCallCount = previousCallCount;
+                await fetchDashboardData();
+                
+                // Check if there are new calls
+                const currentCallCount = dashboardData.dashboard?.overview?.total_calls || 0;
+                if (currentCallCount > oldCallCount && oldCallCount > 0) {
+                    showUpdateNotification(); // Only show notification if there are actually new calls
+                }
+                previousCallCount = currentCallCount;
+                
+                updateKPIs();
+                updateTables();
+                updateCharts();
+            }, 30000);
+        }
+        
+        // Update charts with new data
+        function updateCharts() {
+            // Update chart data without reinitializing
+            if (charts.sentiment && typeof Chart !== 'undefined') {
+                try {
+                    const performance = dashboardData.dashboard?.performance || {};
+                    const sentimentData = performance.sentiment_breakdown || {};
+                    charts.sentiment.data.labels = Object.keys(sentimentData);
+                    charts.sentiment.data.datasets[0].data = Object.values(sentimentData);
+                    charts.sentiment.data.datasets[0].backgroundColor = Object.keys(sentimentData).map(sentiment => {
+                        switch(sentiment) {
+                            case 'positive': return '#10b981';
+                            case 'neutral': return '#6b7280';
+                            case 'negative': return '#ef4444';
+                            default: return '#6b7280';
+                        }
+                    });
+                    charts.sentiment.update();
+                } catch (error) {
+                    console.error('Error updating charts:', error);
+                }
+            }
+        }
+        
+        // Show update notification
+        function showUpdateNotification() {
+            const notification = document.getElementById('updateNotification');
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+        
+        // Show loading state while fetching data
+        function showLoadingState() {
+            // Update KPI cards to show loading state
+            document.getElementById('bookingRate').textContent = '...';
+            document.getElementById('totalCalls').textContent = '...';
+            document.getElementById('avgNegotiationRounds').textContent = '...';
+            document.getElementById('verificationRate').textContent = '...';
+            document.getElementById('revenueImpact').textContent = '...';
+            document.getElementById('successfulCallsCount').textContent = '...';
+            
+            // Show loading in tables
+            document.getElementById('callsTableBody').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; padding: 2rem;">Loading...</td></tr>';
+            document.getElementById('carriersTableBody').innerHTML = 
+                '<tr><td colspan="5" style="text-align: center; padding: 2rem;">Loading...</td></tr>';
+        }
+        
+        // Show error state when data fails to load
+        function showErrorState(errorMessage) {
+            // Update KPI cards to show error state
+            document.getElementById('bookingRate').textContent = '--';
+            document.getElementById('totalCalls').textContent = '--';
+            document.getElementById('avgNegotiationRounds').textContent = '--';
+            document.getElementById('verificationRate').textContent = '--';
+            document.getElementById('revenueImpact').textContent = '--';
+            document.getElementById('successfulCallsCount').textContent = '--';
+            
+            // Show error in tables
+            document.getElementById('callsTableBody').innerHTML = 
+                '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading data: ' + errorMessage + '</td></tr>';
+            document.getElementById('carriersTableBody').innerHTML = 
+                '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading data</td></tr>';
+            
+            console.error('Dashboard error state:', errorMessage);
+        }
+        
+        // Update dashboard when time range changes
+        async function updateDashboard() {
+            await fetchDashboardData();
+            updateKPIs();
+            updateTables();
+            updateCharts();
+            // Don't show notification for manual time range changes
+        }
+        
+        // Export data as CSV
+        function exportData() {
+            const recentCalls = dashboardData.recent_calls || [];
+            let csv = 'Time,Carrier,MC#,Equipment,Route,Outcome,Agreed Rate,Sentiment\n';
+            
+            recentCalls.forEach(call => {
+                csv += `${adjustTime(call.created_at)},`;
+                csv += `${call.carrier_name || 'Unknown'},`;
+                csv += `${call.carrier_mc || ''},`;
+                csv += `${call.equipment_type || ''},`;
+                csv += `${call.origin_preference || ''} to ${call.destination_preference || ''},`;
+                csv += `${call.outcome || 'pending'},`;
+                csv += `${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'},`;
+                csv += `${call.sentiment || 'neutral'}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `carrier_calls_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        }
+        
     </script>
 </body>
 </html>
