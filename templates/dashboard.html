@@ -322,6 +322,49 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
+        /* Tooltip styles */
+        .info-icon {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .info-icon .tooltip {
+            visibility: hidden;
+            width: 300px;
+            background-color: #1e293b;
+            color: white;
+            text-align: left;
+            border-radius: 8px;
+            padding: 12px;
+            position: absolute;
+            z-index: 1000;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -150px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            white-space: pre-line;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .info-icon .tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1e293b transparent transparent transparent;
+        }
+        
+        .info-icon:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -381,12 +424,27 @@
             <div class="chart-container">
                 <div class="chart-header">
                     <h3 class="chart-title">Sentiment Distribution</h3>
+                    <div class="info-icon">
+                        <span style="cursor: help; color: #6b7280; font-size: 1.2rem;">ℹ️</span>
+                        <div class="tooltip">Sentiment Classifications:
+• Positive: Carrier shows enthusiasm, agrees readily, or expresses satisfaction
+• Neutral: Carrier maintains professional tone without strong positive or negative emotions
+• Negative: Carrier shows frustration, disagreement, or dissatisfaction</div>
+                    </div>
                 </div>
                 <canvas id="sentimentChart"></canvas>
             </div>
             <div class="chart-container">
                 <div class="chart-header">
                     <h3 class="chart-title">Outcome Distribution</h3>
+                    <div class="info-icon">
+                        <span style="cursor: help; color: #6b7280; font-size: 1.2rem;">ℹ️</span>
+                        <div class="tooltip">Outcome Classifications:
+• Accepted: Carrier agrees to the load and booking is confirmed
+• Rejected: Carrier declines the load offer or negotiation ends without agreement
+• Failed: Technical issues or system errors prevent completion
+• Incomplete: Call was terminated before reaching a conclusion</div>
+                    </div>
                 </div>
                 <canvas id="outcomeChart"></canvas>
             </div>
@@ -447,8 +505,7 @@
                 day: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit',
-                second: '2-digit',
-                hour12: false
+                hour12: true
             });
         }
         
@@ -559,7 +616,7 @@
                             backgroundColor: Object.keys(sentimentData).map(sentiment => {
                                 switch(sentiment) {
                                     case 'positive': return '#10b981';
-                                    case 'neutral': return '#6b7280';
+                                    case 'neutral': return '#fbbf24';
                                     case 'negative': return '#ef4444';
                                     default: return '#6b7280';
                                 }
@@ -585,9 +642,15 @@
                     labels: Object.keys(outcomeData),
                     datasets: [{
                         data: Object.values(outcomeData),
-                        backgroundColor: Object.keys(outcomeData).map(outcome => 
-                            outcome === 'accepted' ? '#10b981' : '#6b7280'
-                        )
+                        backgroundColor: Object.keys(outcomeData).map(outcome => {
+                            switch(outcome) {
+                                case 'accepted': return '#10b981'; // Green
+                                case 'failed': return '#ef4444'; // Red
+                                case 'rejected': return '#f59e0b'; // Orange
+                                case 'incomplete': return '#8b5cf6'; // Purple
+                                default: return '#6b7280'; // Gray fallback
+                            }
+                        })
                     }]
                 },
                 options: {
@@ -661,7 +724,7 @@
                         <td>${call.carrier_mc || '--'}</td>
                         <td>${call.equipment_type || '--'}</td>
                         <td>${call.origin_preference || '--'} → ${call.destination_preference || '--'}</td>
-                        <td><span class="badge ${call.outcome}">${call.outcome || 'no agreement'}</span></td>
+                        <td><span class="badge ${(call.outcome === 'no_agreement' || call.outcome === 'no-agreement') ? 'rejected' : (call.outcome || 'rejected')}">${(call.outcome === 'no_agreement' || call.outcome === 'no-agreement') ? 'rejected' : (call.outcome || 'rejected')}</span></td>
                         <td>${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'}</td>
                         <td><span class="badge ${call.sentiment}">${call.sentiment || 'neutral'}</span></td>
                     </tr>
@@ -703,7 +766,7 @@
                     charts.sentiment.data.datasets[0].backgroundColor = Object.keys(sentimentData).map(sentiment => {
                         switch(sentiment) {
                             case 'positive': return '#10b981';
-                            case 'neutral': return '#6b7280';
+                            case 'neutral': return '#fbbf24';
                             case 'negative': return '#ef4444';
                             default: return '#6b7280';
                         }
@@ -711,6 +774,28 @@
                     charts.sentiment.update();
                 } catch (error) {
                     console.error('Error updating charts:', error);
+                }
+            }
+            
+            // Update outcome chart
+            if (charts.outcome && typeof Chart !== 'undefined') {
+                try {
+                    const performance = dashboardData.dashboard?.performance || {};
+                    const outcomeData = performance.outcome_breakdown || {};
+                    charts.outcome.data.labels = Object.keys(outcomeData);
+                    charts.outcome.data.datasets[0].data = Object.values(outcomeData);
+                    charts.outcome.data.datasets[0].backgroundColor = Object.keys(outcomeData).map(outcome => {
+                        switch(outcome) {
+                            case 'accepted': return '#10b981'; // Green
+                            case 'failed': return '#ef4444'; // Red
+                            case 'rejected': return '#f59e0b'; // Orange
+                            case 'incomplete': return '#8b5cf6'; // Purple
+                            default: return '#6b7280'; // Gray fallback
+                        }
+                    });
+                    charts.outcome.update();
+                } catch (error) {
+                    console.error('Error updating outcome chart:', error);
                 }
             }
         }
@@ -776,7 +861,7 @@
                 csv += `${call.carrier_mc || ''},`;
                 csv += `${call.equipment_type || ''},`;
                 csv += `${call.origin_preference || ''} to ${call.destination_preference || ''},`;
-                csv += `${call.outcome || 'no agreement'},`;
+                csv += `${(call.outcome === 'no_agreement' || call.outcome === 'no-agreement') ? 'rejected' : (call.outcome || 'rejected')},`;
                 csv += `${call.outcome === 'accepted' ? (call.final_rate ? `$${call.final_rate}` : '$0') : '$0'},`;
                 csv += `${call.sentiment || 'neutral'}\n`;
             });

@@ -26,9 +26,9 @@ class VerifyMCRequest(BaseModel):
 
 class SearchLoadsRequest(BaseModel):
     call_id: str
-    equipment_type: str = Field(..., description="Equipment type (Dry Van, Refrigerated, Flatbed)")
-    origin_city: Optional[str] = Field(None, description="Preferred origin city")
-    origin_state: Optional[str] = Field(None, description="Preferred origin state") 
+    equipment_type: Optional[str] = Field(None, description="Equipment type (Dry Van, Refrigerated, Flatbed)")
+    origin_city: str = Field(..., description="Required origin city")
+    origin_state: str = Field(..., description="Required origin state") 
     destination_city: Optional[str] = Field(None, description="Preferred destination city")
     destination_state: Optional[str] = Field(None, description="Preferred destination state")
 
@@ -116,9 +116,9 @@ async def search_loads(
         
         result = conversation_manager.search_and_present_loads(
             call_id=request.call_id,
-            equipment_type=request.equipment_type,
             origin_city=request.origin_city,
             origin_state=request.origin_state,
+            equipment_type=request.equipment_type,
             destination_city=request.destination_city,
             destination_state=request.destination_state
         )

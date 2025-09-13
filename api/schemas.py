@@ -40,12 +40,12 @@ class Load(LoadBase):
         from_attributes = True
 
 class LoadSearchRequest(BaseModel):
-    # City-level preferences (most specific)
-    origin_city: Optional[str] = None
-    destination_city: Optional[str] = None
+    # Required origin location
+    origin_city: str = Field(..., description="Required origin city")
+    origin_state: str = Field(..., description="Required origin state")
     
-    # State-level preferences (broader matching)
-    origin_state: Optional[str] = None
+    # Optional destination preferences
+    destination_city: Optional[str] = None
     destination_state: Optional[str] = None
     
     # Equipment and rate filters

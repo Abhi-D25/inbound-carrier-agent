@@ -120,8 +120,8 @@ class ConversationManager:
                 "state": ConversationState.LOAD_SEARCH.value,
                 "verified": True,
                 "carrier_name": verification["carrier_name"],
-                "message": f"Great! I've verified {verification['carrier_name']}. What type of equipment do you have and where are you looking to go?",
-                "next_action": "collect_equipment_and_location"
+                "message": f"Great! I've verified {verification['carrier_name']}. Where are you looking to pick up loads? I'll need the city and state.",
+                "next_action": "collect_origin_location"
             }
         else:
             conversation["state"] = ConversationState.FAILED
@@ -135,8 +135,8 @@ class ConversationManager:
                 "next_action": "end_call"
             }
     
-    def search_and_present_loads(self, call_id: str, equipment_type: str, 
-                           origin_city: str = None, origin_state: str = None,
+    def search_and_present_loads(self, call_id: str, origin_city: str, origin_state: str,
+                           equipment_type: str = None, 
                            destination_city: str = None, destination_state: str = None) -> Dict[str, Any]:
         """Search for loads with detailed city and state matching."""
         conversation = self.conversations.get(call_id)
@@ -447,6 +447,7 @@ class ConversationManager:
             else:
                 location_str += f"to {destination_state}"
         
-        return (f"I don't have any {equipment_type} loads available {location_str} right now. "
+        equipment_str = f"{equipment_type} " if equipment_type else ""
+        return (f"I don't have any {equipment_str}loads available {location_str} right now. "
                 "Let me transfer you to our load planning team to see if we can find something "
                 "in nearby areas or check for new loads coming in.")    

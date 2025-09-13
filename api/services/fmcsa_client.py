@@ -82,9 +82,8 @@ class FMCSAClient:
         if len(mc_number) < 1 or len(mc_number) > 7:
             return False
         
-        # Additional check: MC numbers shouldn't start with 0 (except for very old ones)
-        if len(mc_number) > 1 and mc_number[0] == '0':
-            return False
+        # Allow leading zeros for historical MC numbers like 000077
+        # Most MC numbers don't start with 0, but some valid ones do
         
         return True
     
@@ -98,15 +97,16 @@ class FMCSAClient:
         Returns:
             Raw API response
         """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+        # FMCSA API uses webKey as query parameter, not Bearer token
+        # Correct endpoint format: /carriers/docket-number/{mc_number}?webKey={api_key}
+        base_url = "https://mobile.fmcsa.dot.gov/qc/services/carriers/docket-number"
+        url = f"{base_url}/{mc_number}"
+        
+        params = {
+            "webKey": self.api_key
         }
         
-        # FMCSA API endpoint for carrier lookup
-        url = f"{self.base_url}/{mc_number}"
-        
-        response = requests.get(url, headers=headers, timeout=self.timeout)
+        response = requests.get(url, params=params, timeout=self.timeout)
         response.raise_for_status()
         
         return response.json()
@@ -122,15 +122,46 @@ class FMCSAClient:
         Returns:
             Standardized verification result
         """
-        # Extract relevant fields from FMCSA response
-        carrier_name = api_response.get("legalName", "Unknown Carrier")
-        status = api_response.get("carrierStatus", "Unknown")
+        # Handle real FMCSA API response format
+        # Real response structure: {"content": [{"carrier": {...}}]}
+        carrier_data = None
+        if "content" in api_response and len(api_response["content"]) > 0:
+            carrier_data = api_response["content"][0].get("carrier", {})
         
-        # Determine eligibility based on status
-        eligible = self._determine_eligibility(api_response)
+        if carrier_data:
+            # Extract from real FMCSA response
+            carrier_name = carrier_data.get("legalName", "Unknown Carrier")
+            status_code = carrier_data.get("statusCode", "Unknown")
+            allowed_to_operate = carrier_data.get("allowedToOperate", "N")
+            
+            # Convert status code to readable status
+            status_mapping = {
+                "A": "Active",
+                "I": "Inactive", 
+                "S": "Suspended",
+                "R": "Revoked"
+            }
+            status = status_mapping.get(status_code, f"Status Code: {status_code}")
+            
+            # Determine eligibility for real FMCSA data
+            eligible = (status_code == "A" and allowed_to_operate == "Y")
+            
+        else:
+            # Fallback for old format or missing data
+            carrier_name = api_response.get("legalName", "Unknown Carrier")
+            status = api_response.get("carrierStatus", "Unknown")
+            eligible = self._determine_eligibility(api_response)
         
-        # Extract reason for eligibility status
-        reason = self._get_eligibility_reason(api_response, eligible)
+        # Generate appropriate reason
+        if eligible:
+            reason = "Carrier is active and authorized to operate"
+        else:
+            if carrier_data and carrier_data.get("allowedToOperate") == "N":
+                reason = "Carrier is not allowed to operate"
+            elif status != "Active":
+                reason = f"Carrier status: {status}"
+            else:
+                reason = "Carrier verification failed"
         
         return {
             "mc_number": mc_number,

@@ -160,7 +160,10 @@ class MetricsService:
         # Outcome breakdown with freight-specific categories
         outcome_counts = {}
         for call in calls:
-            outcome = call.outcome or "incomplete"
+            outcome = call.outcome or "rejected"  # Use consistent default
+            # Consolidate no_agreement and rejected into rejected
+            if outcome in ["no_agreement", "no-agreement"]:
+                outcome = "rejected"
             outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
         
         # Sentiment breakdown (important for customer satisfaction)
